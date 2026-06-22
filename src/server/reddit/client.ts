@@ -34,6 +34,63 @@ function parseListing(data: {
   return (data.data?.children ?? []).map((c) => c.data);
 }
 
+async function fetchViaPullPush(
+  subreddit: string,
+  limit: number,
+  sort: "new" | "hot",
+): Promise<RedditListingPost[]> {
+  const clean = subreddit.replace(/^r\//i, "");
+  const sortType = sort === "hot" ? "score" : "created_utc";
+  const url = new URL("https://api.pullpush.io/reddit/search/submission/");
+  url.searchParams.set("subreddit", clean);
+  url.searchParams.set("size", String(limit));
+  url.searchParams.set("sort", "desc");
+  url.searchParams.set("sort_type", sortType);
+
+  const res = await fetch(url.toString(), {
+    headers: { Accept: "application/json" },
+    next: { revalidate: 0 },
+  });
+
+  if (!res.ok) {
+    throw new RedditFetchError(
+      `Source PullPush indisponible (${res.status}) pour r/${clean}`,
+      res.status,
+      clean,
+    );
+  }
+
+  const payload = (await res.json()) as {
+    data?: Array<{
+      id?: string;
+      subreddit?: string;
+      title?: string;
+      selftext?: string;
+      author?: string;
+      score?: number;
+      num_comments?: number;
+      url?: string;
+      permalink?: string;
+    }>;
+  };
+
+  return (payload.data ?? [])
+    .filter((post) => post.id && post.title)
+    .map((post) => ({
+      id: post.id!,
+      subreddit: post.subreddit ?? clean,
+      title: post.title!,
+      selftext: post.selftext ?? "",
+      author: post.author ?? "unknown",
+      score: post.score ?? 0,
+      num_comments: post.num_comments ?? 0,
+      url: post.url ?? "",
+      permalink: post.permalink?.startsWith("http")
+        ? post.permalink
+        : `https://www.reddit.com${post.permalink ?? `/r/${clean}/comments/${post.id}`}`,
+    }));
+}
+
 async function fetchPublicJson(
   subreddit: string,
   limit: number,
@@ -71,7 +128,7 @@ async function fetchPublicJson(
 
   throw new RedditFetchError(
     lastStatus === 403
-      ? "Reddit bloque le scraping public (403). Ajoutez REDDIT_CLIENT_ID et REDDIT_CLIENT_SECRET dans .env.local pour le mode lecture app."
+      ? `Reddit JSON public bloqué (403) pour r/${clean}`
       : `Reddit inaccessible (${lastStatus}) pour r/${clean}`,
     lastStatus,
     clean,
@@ -132,14 +189,36 @@ export async function fetchSubredditPosts(
 ): Promise<RedditListingPost[]> {
   try {
     return await fetchPublicJson(subreddit, limit, sort);
-  } catch (error) {
-    if (
-      error instanceof RedditFetchError &&
-      (error.status === 403 || error.status === 429)
-    ) {
-      return fetchViaAppToken(subreddit, limit, sort);
+  } catch (publicError) {
+    try {
+      const posts = await fetchViaPullPush(subreddit, limit, sort);
+      if (posts.length > 0) return posts;
+    } catch (pullPushError) {
+      console.warn("[reddit] PullPush fallback:", pullPushError);
     }
-    throw error;
+
+    const hasAppCreds =
+      process.env.REDDIT_CLIENT_ID && process.env.REDDIT_CLIENT_SECRET;
+    if (
+      hasAppCreds &&
+      publicError instanceof RedditFetchError &&
+      (publicError.status === 403 || publicError.status === 429)
+    ) {
+      try {
+        return await fetchViaAppToken(subreddit, limit, sort);
+      } catch (oauthError) {
+        console.warn("[reddit] OAuth fallback:", oauthError);
+      }
+    }
+
+    if (publicError instanceof RedditFetchError) {
+      throw new RedditFetchError(
+        `${publicError.message}. Aucune source Reddit disponible pour r/${subreddit.replace(/^r\//i, "")}. Réessayez plus tard.`,
+        publicError.status,
+        publicError.subreddit,
+      );
+    }
+    throw publicError;
   }
 }
 
