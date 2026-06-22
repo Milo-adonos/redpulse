@@ -9,7 +9,7 @@ export default function WarmupPage() {
   return (
     <RedditMessageWorkspace
       title="Warmup"
-      description="Posts ICP dans vos subreddits — commentaires naturels sans mentionner votre produit."
+      description="Posts ICP dans vos subreddits — commentaires 100 % naturels, sans aucune promo."
       {...workspace}
     />
   );

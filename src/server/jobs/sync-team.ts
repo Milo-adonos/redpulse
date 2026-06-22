@@ -151,7 +151,7 @@ export async function syncTeamReplies(
     if (created >= maxNew) break;
     if (existingIds.has(post.redditId)) continue;
 
-    const mentionSite = Math.random() < 0.5;
+    const mentionSite = created % 3 !== 2;
     let generatedBody: string;
     let safetyScore = 9;
 

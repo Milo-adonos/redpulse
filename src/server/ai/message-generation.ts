@@ -45,6 +45,7 @@ export async function generateReplyMessage(input: ReplyMessageInput) {
     subreddit: input.subreddit,
     productContext: input.productContext,
     productName,
+    siteUrl: input.siteUrl,
     mentionProduct: input.mentionSite,
     tone: "casual",
   });
