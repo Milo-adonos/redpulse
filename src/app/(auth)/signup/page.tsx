@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState, Suspense } from "react";
-import { signIn } from "next-auth/react";
+import { useEffect, useMemo, useState, Suspense } from "react";
+import { signIn, useSession } from "next-auth/react";
 import {
   AuthShell,
   AuthDivider,
@@ -33,6 +33,7 @@ export default function SignupPage() {
 function SignupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { update } = useSession();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -46,6 +47,20 @@ function SignupForm() {
       : null);
   const fromOnboarding =
     searchParams.get("from") === "onboarding" || !!draftToken;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const raw = localStorage.getItem("redpulse:project-draft");
+    if (!raw) return;
+    try {
+      const draft = JSON.parse(raw) as { projectName?: string };
+      if (draft.projectName && !name) {
+        setName(draft.projectName);
+      }
+    } catch {
+      // ignore
+    }
+  }, [name]);
 
   const acceptInvite = api.team.acceptInvite.useMutation();
 
@@ -63,9 +78,10 @@ function SignupForm() {
   );
 
   const signup = api.auth.signup.useMutation({
-    onSuccess: async () => {
+    onSuccess: async (data) => {
       localStorage.removeItem("redpulse:draft-token");
       localStorage.removeItem("redpulse:project-draft");
+      localStorage.removeItem("redpulse:onboarding-draft");
 
       const result = await signIn("credentials", {
         email,
@@ -73,20 +89,36 @@ function SignupForm() {
         redirect: false,
       });
 
-      const invite = searchParams.get("invite");
-      if (invite && result?.ok) {
-        acceptInvite.mutate({ token: invite });
-      }
-
       if (result?.ok) {
+        await update({ teamId: data.teamId });
+        const invite = searchParams.get("invite");
+        if (invite) {
+          acceptInvite.mutate({ token: invite });
+        }
         router.replace("/dashboard");
         return;
       }
 
-      setError("Compte créé. Connectez-vous pour accéder au dashboard.");
-      router.replace("/login?callbackUrl=/dashboard");
+      if (result?.error === "CredentialsSignin") {
+        setError(
+          "Compte créé. Mot de passe incorrect lors de la connexion auto — connectez-vous manuellement.",
+        );
+      } else {
+        setError(
+          `Compte créé. Connexion auto échouée${result?.error ? ` (${result.error})` : ""} — connectez-vous avec votre email et mot de passe.`,
+        );
+      }
+      router.replace(`/login?callbackUrl=/dashboard&email=${encodeURIComponent(email)}`);
     },
-    onError: (err) => setError(err.message),
+    onError: (err) => {
+      if (err.message.includes("déjà utilisé")) {
+        setError(
+          "Cet email est déjà utilisé. Connectez-vous ou utilisez un autre email.",
+        );
+        return;
+      }
+      setError(err.message);
+    },
   });
 
   function handleSubmit(e: React.FormEvent) {

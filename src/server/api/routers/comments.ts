@@ -13,6 +13,7 @@ import {
 import { generateRedditReply } from "@/server/ai/anthropic";
 import { decryptSecret, encryptSecret, hasEncryptionKey } from "@/server/crypto";
 import {
+  normalizeRedditPermalink,
   postRedditComment,
   refreshUserToken,
 } from "@/server/reddit/client";
@@ -286,7 +287,11 @@ export const commentsRouter = createTRPCRouter({
 
       return {
         redditCommentId: published.id,
-        permalink: `https://reddit.com${published.permalink}`,
+        permalink: normalizeRedditPermalink(
+          published.permalink,
+          "",
+          published.id,
+        ),
       };
     }),
 });

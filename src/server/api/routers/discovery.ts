@@ -2,6 +2,7 @@ import { z } from "zod";
 import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { createTRPCRouter, teamProcedure } from "@/server/api/trpc";
 import { discoveredPosts } from "@/server/db/schema";
+import { buildRedditPostUrl } from "@/server/reddit/client";
 
 export const discoveryRouter = createTRPCRouter({
   list: teamProcedure
@@ -99,7 +100,11 @@ function formatPost(post: typeof discoveredPosts.$inferSelect) {
           : undefined,
     preview: post.body?.slice(0, 280) ?? post.title,
     redditId: post.redditId,
-    permalink: post.permalink,
+    permalink: buildRedditPostUrl(
+      post.subreddit,
+      post.redditId,
+      post.permalink,
+    ),
     intentScore: Number(post.intentScore ?? 0),
     body: post.body,
   };

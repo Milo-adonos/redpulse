@@ -2,101 +2,204 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { GlassPanel } from "./glass-panel";
 import { api } from "@/trpc/react";
 import { ux } from "@/lib/ux-copy";
 import { cn } from "@/lib/utils";
 
-type Step = "product" | "project" | "team";
+type Step = "site" | "project";
 
 const STEP_INDEX: Record<Step, number> = {
-  product: 0,
+  site: 0,
   project: 1,
-  team: 2,
 };
+
+const DRAFT_STORAGE_KEY = "redpulse:onboarding-draft";
+
+type OnboardingDraft = {
+  url: string;
+  projectName: string;
+  description: string;
+  keywords: string[];
+  subreddits: string[];
+};
+
+function parseList(value: string): string[] {
+  return value
+    .split(",")
+    .map((s) => s.trim().replace(/^r\//i, ""))
+    .filter(Boolean);
+}
+
+function normalizeUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function saveDraftToStorage(draft: OnboardingDraft) {
+  try {
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+  } catch {
+    // ignore quota errors
+  }
+}
+
+function loadDraftFromStorage(): Partial<OnboardingDraft> | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as Partial<OnboardingDraft>;
+  } catch {
+    return null;
+  }
+}
 
 export function OnboardingFlow() {
   const router = useRouter();
-  const { data: session } = useSession();
-  const [step, setStep] = useState<Step>("product");
+  const [step, setStep] = useState<Step>("site");
   const [url, setUrl] = useState("");
-  const [description, setDescription] = useState("");
   const [projectName, setProjectName] = useState("");
-  const [invites, setInvites] = useState("");
+  const [description, setDescription] = useState("");
+  const [keywords, setKeywords] = useState<string[]>([]);
+  const [subreddits, setSubreddits] = useState<string[]>([]);
   const [error, setError] = useState("");
 
-  const createDraft = api.project.createDraft.useMutation({
+  useEffect(() => {
+    const saved = loadDraftFromStorage();
+    if (!saved) return;
+    if (saved.url) setUrl(saved.url);
+    if (saved.projectName) setProjectName(saved.projectName);
+    if (saved.description) setDescription(saved.description);
+    if (saved.keywords?.length) setKeywords(saved.keywords);
+    if (saved.subreddits?.length) setSubreddits(saved.subreddits);
+    if (saved.projectName && saved.description) setStep("project");
+  }, []);
+
+  useEffect(() => {
+    if (!url && !projectName && !description) return;
+    saveDraftToStorage({
+      url,
+      projectName,
+      description,
+      keywords,
+      subreddits,
+    });
+  }, [url, projectName, description, keywords, subreddits]);
+
+  const analyzeSite = api.project.analyzeSite.useMutation({
     onSuccess: (data) => {
-      localStorage.setItem("redpulse:draft-token", data.draftToken);
-      localStorage.setItem("redpulse:project-draft", JSON.stringify(data));
-      if (session?.user) {
-        router.replace("/dashboard");
-        return;
-      }
-      router.replace(
-        `/signup?draft=${encodeURIComponent(data.draftToken)}&from=onboarding`,
-      );
+      setError("");
+      setProjectName(data.title);
+      setDescription(data.suggestedDescription);
+      setKeywords(data.keywords);
+      setSubreddits(data.subreddits);
+      setUrl(data.url);
+      setStep("project");
     },
     onError: (e) => setError(e.message),
   });
 
+  const createDraft = api.project.createDraft.useMutation({
+    onSuccess: (data) => {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      localStorage.setItem("redpulse:draft-token", data.draftToken);
+      localStorage.setItem("redpulse:project-draft", JSON.stringify(data));
+      router.push(
+        `/signup?draft=${encodeURIComponent(data.draftToken)}&from=onboarding`,
+      );
+    },
+    onError: (e) => {
+      setError(
+        e.message.includes("Invalid")
+          ? "Impossible d'enregistrer le projet — vérifiez l'URL et réessayez."
+          : e.message,
+      );
+    },
+  });
+
   const currentIndex = STEP_INDEX[step];
 
-  function continueFromProduct() {
+  function analyzeAndContinue() {
     setError("");
-    if (!url.trim()) {
+    const normalized = normalizeUrl(url);
+    if (!normalized) {
       setError("Indiquez l'URL de votre site.");
       return;
     }
-    if (!projectName.trim()) {
-      const host = url.replace(/^https?:\/\//, "").split("/")[0] ?? "Mon projet";
-      setProjectName(host.split(".")[0] ?? "Mon projet");
+    setUrl(normalized);
+    analyzeSite.mutate({ url: normalized });
+  }
+
+  function createAccount() {
+    setError("");
+    const siteUrl = normalizeUrl(url);
+    if (!siteUrl) {
+      setError("URL du site manquante — retournez à l'étape 1.");
+      setStep("site");
+      return;
     }
-    setStep("project");
+    if (!projectName.trim() || !description.trim()) {
+      setError("Nom du projet et description requis.");
+      return;
+    }
+
+    createDraft.mutate({
+      projectName: projectName.trim(),
+      siteUrl,
+      description: description.trim(),
+      keywords,
+      subreddits,
+      invites: [],
+    });
   }
 
   return (
     <section id="start" className="relative scroll-mt-24 py-24 sm:py-32">
       <div className="mx-auto max-w-2xl px-5 text-center sm:px-8">
         <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-primary">
-          Prise en main · 3 étapes
+          Prise en main · 2 étapes
         </p>
         <h2 className="mt-4 text-balance text-3xl font-bold tracking-[-0.03em] text-white sm:text-4xl">
-          {step === "product" && "Votre produit"}
-          {step === "project" && ux.onboarding.projectTitle}
-          {step === "team" && ux.onboarding.teamTitle}
+          {step === "site" && "Votre site"}
+          {step === "project" && "Votre projet"}
         </h2>
+        <p className="mt-3 text-sm text-white/40">
+          {step === "site" &&
+            "Collez votre URL — on analyse le site et génère un brief détaillé pour Reddit."}
+          {step === "project" &&
+            "Vérifiez le brief, puis créez votre compte pour accéder au dashboard."}
+        </p>
       </div>
 
       <div className="mx-auto mt-12 max-w-xl px-5 sm:px-8">
         <GlassPanel className="p-6 sm:p-8">
           <div className="mb-8 flex justify-center gap-2">
-              {ux.onboarding.steps.map((label, i) => (
-                <div key={label} className="flex flex-col items-center gap-2">
-                  <div
-                    className={cn(
-                      "h-1 w-14 rounded-full transition-colors duration-300",
-                      i <= currentIndex ? "bg-primary" : "bg-white/10",
-                    )}
-                  />
-                  <span
-                    className={cn(
-                      "text-[10px] uppercase tracking-wider",
-                      i <= currentIndex ? "text-primary/80" : "text-white/25",
-                    )}
-                  >
-                    {label}
-                  </span>
-                </div>
-              ))}
-            </div>
+            {["Produit", "Projet"].map((label, i) => (
+              <div key={label} className="flex flex-col items-center gap-2">
+                <div
+                  className={cn(
+                    "h-1 w-14 rounded-full transition-colors duration-300",
+                    i <= currentIndex ? "bg-primary" : "bg-white/10",
+                  )}
+                />
+                <span
+                  className={cn(
+                    "text-[10px] uppercase tracking-wider",
+                    i <= currentIndex ? "text-primary/80" : "text-white/25",
+                  )}
+                >
+                  {label}
+                </span>
+              </div>
+            ))}
+          </div>
 
           <AnimatePresence mode="wait">
-            {step === "product" && (
+            {step === "site" && (
               <motion.div
-                key="product"
+                key="site"
                 initial={{ opacity: 0, x: 12 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -12 }}
@@ -110,23 +213,19 @@ export function OnboardingFlow() {
                   placeholder={ux.onboarding.placeholders.url}
                   className="w-full rounded-xl border border-white/[0.08] bg-black/40 px-4 py-4 text-center text-sm text-white outline-none placeholder:text-white/25 focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
                 />
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  rows={3}
-                  placeholder="Décrivez votre produit en quelques mots (optionnel)"
-                  className="w-full resize-none rounded-xl border border-white/[0.08] bg-black/40 px-4 py-3 text-sm leading-relaxed text-white outline-none placeholder:text-white/25 focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
-                />
-                <p className="text-[11px] text-white/30">{ux.hints.url}</p>
+                <p className="text-[11px] text-white/30">
+                  Scraping du site + brief IA (ICP, mots-clés, subreddits).
+                </p>
                 {error && (
                   <p className="text-center text-sm text-red-400">{error}</p>
                 )}
                 <button
                   type="button"
-                  onClick={continueFromProduct}
-                  className="w-full rounded-full bg-white py-4 text-[14px] font-semibold text-black transition-all hover:bg-white/90"
+                  onClick={analyzeAndContinue}
+                  disabled={analyzeSite.isLoading}
+                  className="w-full rounded-full bg-white py-4 text-[14px] font-semibold text-black transition-all hover:bg-white/90 disabled:opacity-60"
                 >
-                  {ux.cta.continue} →
+                  {analyzeSite.isLoading ? "Analyse en cours…" : "Analyser mon site →"}
                 </button>
               </motion.div>
             )}
@@ -144,69 +243,58 @@ export function OnboardingFlow() {
                   value={projectName}
                   onChange={(e) => setProjectName(e.target.value)}
                   placeholder={ux.onboarding.placeholders.projectName}
-                  autoFocus
-                  className="w-full rounded-xl border border-white/[0.08] bg-black/40 px-4 py-4 text-sm text-white outline-none placeholder:text-white/25 focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
+                  className="w-full rounded-xl border border-white/[0.08] bg-black/40 px-4 py-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-primary/40"
                 />
-                <p className="text-[11px] text-white/30">Nom affiché dans RedPulse</p>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={8}
+                  placeholder="Brief produit détaillé…"
+                  className="w-full resize-none rounded-xl border border-white/[0.08] bg-black/40 px-4 py-3 text-sm leading-relaxed text-white outline-none placeholder:text-white/25 focus:border-primary/40"
+                />
+                <div>
+                  <label className="text-[11px] text-white/40">Mots-clés ICP</label>
+                  <input
+                    value={keywords.join(", ")}
+                    onChange={(e) => setKeywords(parseList(e.target.value))}
+                    className="mt-1 w-full rounded-xl border border-white/[0.08] bg-black/40 px-4 py-3 text-sm text-white outline-none focus:border-primary/40"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] text-white/40">Subreddits ciblés</label>
+                  <input
+                    value={subreddits.map((s) => `r/${s}`).join(", ")}
+                    onChange={(e) => setSubreddits(parseList(e.target.value))}
+                    className="mt-1 w-full rounded-xl border border-white/[0.08] bg-black/40 px-4 py-3 text-sm text-white outline-none focus:border-primary/40"
+                  />
+                  <p className="mt-1 text-[10px] text-white/30">
+                    Suggérés automatiquement — modifiables dans Settings.
+                  </p>
+                </div>
+                {error && (
+                  <p className="text-center text-sm text-red-400">{error}</p>
+                )}
                 <div className="flex gap-3">
                   <button
                     type="button"
-                    onClick={() => setStep("product")}
+                    onClick={() => setStep("site")}
                     className="flex-1 rounded-full border border-white/10 py-3 text-[13px] text-white/70 hover:text-white"
                   >
                     ← Retour
                   </button>
                   <button
                     type="button"
-                    onClick={() => setStep("team")}
-                    disabled={!projectName.trim()}
-                    className="flex-1 rounded-full bg-white py-3 text-[13px] font-semibold text-black hover:bg-white/90 disabled:opacity-40"
+                    onClick={createAccount}
+                    disabled={
+                      createDraft.isLoading ||
+                      !projectName.trim() ||
+                      !description.trim()
+                    }
+                    className="flex-1 rounded-full bg-primary py-3 text-[13px] font-semibold text-white hover:bg-primary/90 disabled:opacity-40"
                   >
-                    {ux.cta.continue} →
+                    {createDraft.isLoading ? "Préparation…" : "Créer mon compte →"}
                   </button>
                 </div>
-              </motion.div>
-            )}
-
-            {step === "team" && (
-              <motion.div
-                key="team"
-                initial={{ opacity: 0, x: 12 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -12 }}
-                transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                className="space-y-4"
-              >
-                <input
-                  value={invites}
-                  onChange={(e) => setInvites(e.target.value)}
-                  placeholder={ux.onboarding.placeholders.invites}
-                  className="w-full rounded-xl border border-white/[0.08] bg-black/40 px-4 py-4 text-sm text-white outline-none placeholder:text-white/25 focus:border-primary/40 focus:ring-2 focus:ring-primary/20"
-                />
-                <p className="text-[11px] text-white/30">
-                  Accès immédiat si le compte existe, sinon en attente à l&apos;inscription.
-                </p>
-                {error && (
-                  <p className="text-center text-sm text-red-400">{error}</p>
-                )}
-                <button
-                  type="button"
-                  disabled={createDraft.isLoading}
-                  onClick={() =>
-                    createDraft.mutate({
-                      projectName: projectName.trim() || "Mon projet",
-                      siteUrl: url.startsWith("http") ? url : `https://${url}`,
-                      description: description.trim(),
-                      invites: invites
-                        .split(",")
-                        .map((e) => e.trim())
-                        .filter(Boolean),
-                    })
-                  }
-                  className="w-full rounded-full bg-primary py-4 text-[14px] font-semibold text-white transition-all hover:bg-primary/90 disabled:opacity-60"
-                >
-                  {createDraft.isLoading ? "Création…" : "Continuer →"}
-                </button>
               </motion.div>
             )}
           </AnimatePresence>

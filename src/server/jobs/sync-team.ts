@@ -2,8 +2,8 @@ import { and, desc, eq } from "drizzle-orm";
 import type { Database } from "@/server/db";
 import {
   discoveredPosts,
+  directMessages,
   generatedMessages,
-  keywordFilters,
   projects,
   teamMembers,
   teamSettings,
@@ -14,17 +14,53 @@ import {
   generateWarmupMessage,
   type ResponseLanguage,
 } from "@/server/ai/message-generation";
-import { fetchSubredditPosts } from "@/server/reddit/client";
-import { scrapeTeamDiscovery } from "@/server/reddit/scraper";
+import { generateRedditReply } from "@/server/ai/anthropic";
+import {
+  buildRedditPostUrl,
+  fetchSubredditPosts,
+  isInTargetSubreddit,
+  isRelevantToIcp,
+} from "@/server/reddit/client";
+import {
+  getMaxPostAgeDate,
+  redditDateFromUnix,
+} from "@/server/reddit/freshness";
+import { getTeamTargeting, scrapeTeamDiscovery } from "@/server/reddit/scraper";
 
-const DEFAULT_MAX_REPLIES = Number(process.env.SCRAPE_MAX_REPLIES_PER_RUN ?? 5);
-const DEFAULT_MAX_WARMUP = Number(process.env.SCRAPE_MAX_WARMUP_PER_RUN ?? 3);
+const DEFAULT_MAX_REPLIES = Number(process.env.SCRAPE_MAX_REPLIES_PER_RUN ?? 8);
+const DEFAULT_MAX_WARMUP = Number(process.env.SCRAPE_MAX_WARMUP_PER_RUN ?? 5);
+const DEFAULT_MAX_DMS = Number(process.env.SCRAPE_MAX_DMS_PER_RUN ?? 3);
 
-async function getLanguage(db: Database, teamId: string): Promise<ResponseLanguage> {
-  const settings = await db.query.teamSettings.findFirst({
-    where: eq(teamSettings.teamId, teamId),
-  });
-  return (settings?.responseLanguage ?? "fr") as ResponseLanguage;
+function isLikelyFrench(text: string): boolean {
+  return /\b(j'ai|j'|c'est|les |des |pour |avec |truc|plutôt|ça |une |dans |qui |mais |être|français)\b/i.test(
+    text,
+  );
+}
+
+function isMessageRecent(_redditCreatedAt: Date | null, createdAt: Date): boolean {
+  return createdAt >= getMaxPostAgeDate();
+}
+
+function fallbackWarmupBody(subreddit: string, title: string): string {
+  const t = title.toLowerCase();
+  if (/nail|manicure|polish|gel/.test(t)) {
+    return "these look really clean, love the shape on these";
+  }
+  if (/\?|help|advice|recommend/.test(t)) {
+    return "following this thread, curious what others ended up going with";
+  }
+  return `solid post — always good to see real talk in r/${subreddit.replace(/^r\//i, "")}`;
+}
+
+function fallbackReplyBody(productName: string, mentionSite: boolean): string {
+  if (mentionSite) {
+    return `we had something similar at our salon — ended up using ${productName} to preview designs on clients before committing, saved a lot of back and forth`;
+  }
+  return "yeah previewing the design first helps a ton, especially when clients aren't sure what they want";
+}
+
+async function getLanguage(): Promise<ResponseLanguage> {
+  return "en";
 }
 
 async function getTeamOwnerId(db: Database, teamId: string): Promise<string | null> {
@@ -50,11 +86,15 @@ export async function syncTeamReplies(
   options?: { maxNew?: number; userId?: string | null },
 ) {
   const maxNew = options?.maxNew ?? DEFAULT_MAX_REPLIES;
-  await scrapeTeamDiscovery(db, teamId);
+  try {
+    await scrapeTeamDiscovery(db, teamId);
+  } catch (error) {
+    console.warn(`[sync-team] scrape ${teamId}:`, error);
+  }
 
-  const [project, language, existing, discovered] = await Promise.all([
+  const [project, language, existing, discovered, targeting] = await Promise.all([
     db.query.projects.findFirst({ where: eq(projects.teamId, teamId) }),
-    getLanguage(db, teamId),
+    getLanguage(),
     db.query.generatedMessages.findMany({
       where: and(
         eq(generatedMessages.teamId, teamId),
@@ -66,36 +106,77 @@ export async function syncTeamReplies(
         eq(discoveredPosts.teamId, teamId),
         eq(discoveredPosts.isArchived, false),
       ),
-      orderBy: [desc(discoveredPosts.intentScore), desc(discoveredPosts.score)],
-      limit: 30,
+      orderBy: [desc(discoveredPosts.discoveredAt), desc(discoveredPosts.intentScore)],
+      limit: 40,
     }),
+    getTeamTargeting(db, teamId),
   ]);
+
+  const { keywords, subreddits } = targeting;
+  const relevantDiscovered = discovered.filter((post) =>
+    isInTargetSubreddit(post.subreddit, subreddits) &&
+    isRelevantToIcp(
+      post.title,
+      post.body ?? "",
+      keywords,
+      subreddits,
+      post.subreddit,
+    ),
+  );
 
   const existingIds = new Set(existing.map((m) => m.redditId));
   const actorId = options?.userId ?? (await getTeamOwnerId(db, teamId));
   let created = 0;
 
-  const productContext =
-    project?.description ||
-    project?.name ||
-    "outil SaaS pour automatiser le marketing";
+  for (const msg of existing) {
+    if (msg.isSent) continue;
+    if (
+      !isInTargetSubreddit(msg.subreddit, subreddits) ||
+      !isRelevantToIcp(
+        msg.title,
+        msg.postBody ?? "",
+        keywords,
+        subreddits,
+        msg.subreddit,
+      ) ||
+      !isMessageRecent(msg.redditCreatedAt, msg.createdAt) ||
+      isLikelyFrench(msg.generatedBody)
+    ) {
+      await db.delete(generatedMessages).where(eq(generatedMessages.id, msg.id));
+      existingIds.delete(msg.redditId);
+    }
+  }
 
-  for (const post of discovered) {
+  for (const post of relevantDiscovered) {
     if (created >= maxNew) break;
     if (existingIds.has(post.redditId)) continue;
 
     const mentionSite = Math.random() < 0.5;
+    let generatedBody: string;
+    let safetyScore = 9;
+
     try {
       const generated = await generateReplyMessage({
         postTitle: post.title,
         postBody: post.body ?? undefined,
         subreddit: post.subreddit,
-        productContext,
-        siteUrl: project?.siteUrl,
+        productContext: project?.description || project?.name || "",
+        productName: project?.name ?? undefined,
+        siteUrl: project?.siteUrl ?? undefined,
         mentionSite,
         language,
       });
+      generatedBody = generated.body;
+      safetyScore = generated.safetyScore;
+    } catch (error) {
+      console.error(`[sync-team] reply AI ${post.redditId}:`, error);
+      generatedBody = fallbackReplyBody(
+        project?.name ?? "our tool",
+        mentionSite,
+      );
+    }
 
+    try {
       await db.insert(generatedMessages).values({
         teamId,
         type: "reply",
@@ -103,25 +184,27 @@ export async function syncTeamReplies(
         subreddit: post.subreddit,
         title: post.title,
         author: post.author,
-        permalink:
-          post.permalink ??
-          `https://reddit.com/r/${post.subreddit}/comments/${post.redditId}`,
+        permalink: buildRedditPostUrl(
+          post.subreddit,
+          post.redditId,
+          post.permalink,
+        ),
         postBody: post.body,
-        generatedBody: generated.body,
+        generatedBody,
         relevanceScore: post.intentScore,
-        safetyScore: generated.safetyScore,
+        safetyScore,
         generatedByUserId: actorId,
         redditCreatedAt: post.discoveredAt,
       });
       existingIds.add(post.redditId);
       created++;
     } catch (error) {
-      console.error(`[sync-team] reply ${post.redditId}:`, error);
+      console.error(`[sync-team] reply insert ${post.redditId}:`, error);
       continue;
     }
   }
 
-  return { created, scraped: discovered.length };
+  return { created, scraped: relevantDiscovered.length };
 }
 
 export async function syncTeamWarmup(
@@ -131,11 +214,9 @@ export async function syncTeamWarmup(
 ) {
   const maxNew = options?.maxNew ?? DEFAULT_MAX_WARMUP;
 
-  const [filter, language, existing] = await Promise.all([
-    db.query.keywordFilters.findFirst({
-      where: eq(keywordFilters.teamId, teamId),
-    }),
-    getLanguage(db, teamId),
+  const [targeting, language, existing] = await Promise.all([
+    getTeamTargeting(db, teamId),
+    getLanguage(),
     db.query.generatedMessages.findMany({
       where: and(
         eq(generatedMessages.teamId, teamId),
@@ -144,20 +225,36 @@ export async function syncTeamWarmup(
     }),
   ]);
 
-  const subreddits = filter?.subreddits?.length
-    ? filter.subreddits
-    : ["SaaS", "startups", "marketing"];
+  const { keywords, subreddits } = targeting;
 
   const existingIds = new Set(existing.map((m) => m.redditId));
   const actorId = options?.userId ?? (await getTeamOwnerId(db, teamId));
   let created = 0;
 
-  for (const sub of subreddits.slice(0, 4)) {
+  for (const msg of existing) {
+    if (msg.isSent) continue;
+    if (
+      !isInTargetSubreddit(msg.subreddit, subreddits) ||
+      !isRelevantToIcp(
+        msg.title,
+        msg.postBody ?? "",
+        keywords,
+        subreddits,
+        msg.subreddit,
+      ) ||
+      !isMessageRecent(msg.redditCreatedAt, msg.createdAt)
+    ) {
+      await db.delete(generatedMessages).where(eq(generatedMessages.id, msg.id));
+      existingIds.delete(msg.redditId);
+    }
+  }
+
+  for (const sub of subreddits.slice(0, 6)) {
     if (created >= maxNew) break;
 
     let posts;
     try {
-      posts = await fetchSubredditPosts(sub, 10, "hot");
+      posts = await fetchSubredditPosts(sub, 10, "new");
     } catch {
       continue;
     }
@@ -165,14 +262,35 @@ export async function syncTeamWarmup(
     for (const post of posts) {
       if (created >= maxNew) break;
       if (existingIds.has(post.id)) continue;
+      if (!isInTargetSubreddit(post.subreddit, subreddits)) continue;
+      if (
+        !isRelevantToIcp(
+          post.title,
+          post.selftext ?? "",
+          keywords,
+          subreddits,
+          post.subreddit,
+        )
+      ) {
+        continue;
+      }
 
       try {
-        const generated = await generateWarmupMessage({
-          postTitle: post.title,
-          postBody: post.selftext || undefined,
-          subreddit: post.subreddit,
-          language,
-        });
+        let generatedBody: string;
+        let safetyScore = 9;
+        try {
+          const generated = await generateWarmupMessage({
+            postTitle: post.title,
+            postBody: post.selftext || undefined,
+            subreddit: post.subreddit,
+            language,
+          });
+          generatedBody = generated.body;
+          safetyScore = generated.safetyScore;
+        } catch (error) {
+          console.error(`[sync-team] warmup AI ${post.id}:`, error);
+          generatedBody = fallbackWarmupBody(post.subreddit, post.title);
+        }
 
         await db.insert(generatedMessages).values({
           teamId,
@@ -181,13 +299,18 @@ export async function syncTeamWarmup(
           subreddit: post.subreddit,
           title: post.title,
           author: post.author,
-          permalink: `https://reddit.com${post.permalink}`,
+          permalink: buildRedditPostUrl(
+            post.subreddit,
+            post.id,
+            post.permalink,
+            post.url,
+          ),
           postBody: post.selftext || null,
-          generatedBody: generated.body,
+          generatedBody,
           relevanceScore: String(Math.min(1, post.score / 1000)),
-          safetyScore: generated.safetyScore,
+          safetyScore,
           generatedByUserId: actorId,
-          redditCreatedAt: null,
+          redditCreatedAt: redditDateFromUnix(post.created_utc),
         });
         existingIds.add(post.id);
         created++;
@@ -201,6 +324,95 @@ export async function syncTeamWarmup(
   return { created };
 }
 
+export async function syncTeamDms(
+  db: Database,
+  teamId: string,
+  options?: { maxNew?: number; userId?: string | null },
+) {
+  const maxNew = options?.maxNew ?? DEFAULT_MAX_DMS;
+
+  const [project, targeting, existing, discovered] = await Promise.all([
+    db.query.projects.findFirst({ where: eq(projects.teamId, teamId) }),
+    getTeamTargeting(db, teamId),
+    db.query.directMessages.findMany({
+      where: eq(directMessages.teamId, teamId),
+    }),
+    db.query.discoveredPosts.findMany({
+      where: and(
+        eq(discoveredPosts.teamId, teamId),
+        eq(discoveredPosts.isArchived, false),
+      ),
+      orderBy: [desc(discoveredPosts.intentScore), desc(discoveredPosts.discoveredAt)],
+      limit: 20,
+    }),
+  ]);
+
+  const { keywords, subreddits } = targeting;
+  const existingPostIds = new Set(
+    existing.map((dm) => dm.discoveredPostId).filter(Boolean),
+  );
+  const actorId = options?.userId ?? (await getTeamOwnerId(db, teamId));
+  let created = 0;
+
+  for (const post of discovered) {
+    if (created >= maxNew) break;
+    if (existingPostIds.has(post.id)) continue;
+    if (!post.author || post.author === "unknown" || post.author === "[deleted]") {
+      continue;
+    }
+    if (
+      !isRelevantToIcp(
+        post.title,
+        post.body ?? "",
+        keywords,
+        subreddits,
+        post.subreddit,
+      )
+    ) {
+      continue;
+    }
+
+    try {
+      let body: string;
+      try {
+        const result = await generateRedditReply({
+          postTitle: post.title,
+          postBody: post.body ?? undefined,
+          subreddit: post.subreddit,
+          productContext: project?.description ?? project?.name ?? "",
+          productName: project?.name ?? undefined,
+          mentionProduct: true,
+          tone: "casual",
+        });
+        body = `Hey — saw your post in r/${post.subreddit}. ${result.body}`;
+      } catch (error) {
+        console.error(`[sync-team] dm AI ${post.redditId}:`, error);
+        body = `Hey — saw your post in r/${post.subreddit}. ${fallbackReplyBody(project?.name ?? "MakeMyNails", true)}`;
+      }
+
+      const recipient = post.author.replace(/^u\//i, "");
+      const subject = `Re: ${post.title.slice(0, 80)}`;
+
+      await db.insert(directMessages).values({
+        teamId,
+        userId: actorId,
+        discoveredPostId: post.id,
+        recipientUsername: recipient,
+        subject,
+        body: body.slice(0, 2000),
+        status: "pending_review",
+      });
+      existingPostIds.add(post.id);
+      created++;
+    } catch (error) {
+      console.error(`[sync-team] dm ${post.redditId}:`, error);
+      continue;
+    }
+  }
+
+  return { created };
+}
+
 export async function runFullTeamSync(
   db: Database,
   teamId: string,
@@ -208,26 +420,28 @@ export async function runFullTeamSync(
 ) {
   let redditError: string | undefined;
 
-  const [replies, warmup] = await Promise.all([
-    syncTeamReplies(db, teamId, { userId }).catch((error) => {
-      redditError =
-        error instanceof Error ? error.message : "Erreur sync reply";
-      return { created: 0, scraped: 0, error: redditError };
-    }),
-    syncTeamWarmup(db, teamId, { userId }).catch((error) => {
-      const msg = error instanceof Error ? error.message : "Erreur sync warmup";
-      redditError = redditError ?? msg;
-      return { created: 0, error: msg };
-    }),
-  ]);
+  const warmup = await syncTeamWarmup(db, teamId, { userId }).catch((error) => {
+    const msg = error instanceof Error ? error.message : "Erreur sync warmup";
+    redditError = msg;
+    return { created: 0, error: msg };
+  });
 
-  if (!redditError && (replies.created > 0 || warmup.created > 0)) {
-    await touchTeamSync(db, teamId);
-  } else if (!redditError) {
-    await touchTeamSync(db, teamId);
-  }
+  const replies = await syncTeamReplies(db, teamId, { userId }).catch((error) => {
+    redditError =
+      redditError ??
+      (error instanceof Error ? error.message : "Erreur sync reply");
+    return { created: 0, scraped: 0, error: redditError };
+  });
 
-  return { teamId, replies, warmup, redditError };
+  const dms = await syncTeamDms(db, teamId, { userId }).catch((error) => {
+    const msg = error instanceof Error ? error.message : "Erreur sync DM";
+    redditError = redditError ?? msg;
+    return { created: 0, error: msg };
+  });
+
+  await touchTeamSync(db, teamId);
+
+  return { teamId, replies, warmup, dms, redditError };
 }
 
 export async function runAllTeamsSync(db: Database) {

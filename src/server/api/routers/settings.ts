@@ -7,15 +7,17 @@ import {
   responseTemplates,
   teamSettings,
 } from "@/server/db/schema";
+import { refreshTeamSubreddits } from "@/server/reddit/scraper";
+import {
+  analyzeProductFromSite,
+  extractKeywords,
+} from "@/server/project/site-analysis";
 
 export const settingsRouter = createTRPCRouter({
   get: teamProcedure.query(async ({ ctx }) => {
-    const [filters, settings, project] = await Promise.all([
+    const [filters, project] = await Promise.all([
       ctx.db!.query.keywordFilters.findFirst({
         where: eq(keywordFilters.teamId, ctx.teamId),
-      }),
-      ctx.db!.query.teamSettings.findFirst({
-        where: eq(teamSettings.teamId, ctx.teamId),
       }),
       ctx.db!.query.projects.findFirst({
         where: eq(projects.teamId, ctx.teamId),
@@ -23,31 +25,39 @@ export const settingsRouter = createTRPCRouter({
     ]);
 
     return {
+      projectName: project?.name ?? "",
       siteUrl: project?.siteUrl ?? "",
       description: project?.description ?? "",
-      subreddits: filters?.subreddits ?? [
-        "SaaS",
-        "startups",
-        "marketing",
-        "entrepreneur",
-        "growth",
-      ],
-      keywords: filters?.keywords ?? [
+      subreddits: filters?.subreddits ?? [],
+      keywords: filters?.keywords ?? project?.keywords ?? [
         "automation",
         "SaaS",
         "growth",
         "marketing",
         "startup",
       ],
-      responseLanguage: (settings?.responseLanguage ?? "fr") as "fr" | "en",
+      responseLanguage: "en" as const,
     };
+  }),
+
+  analyzeSite: teamProcedure
+    .input(z.object({ url: z.string().min(3).max(500) }))
+    .mutation(async ({ input }) => {
+      return analyzeProductFromSite(input.url);
+    }),
+
+  rediscoverSubreddits: teamProcedure.mutation(async ({ ctx }) => {
+    const subreddits = await refreshTeamSubreddits(ctx.db!, ctx.teamId);
+    return { subreddits };
   }),
 
   updateProject: teamProcedure
     .input(
       z.object({
+        name: z.string().min(2).max(100).optional(),
         siteUrl: z.string().url(),
-        description: z.string().max(2000),
+        description: z.string().max(4000),
+        keywords: z.array(z.string()).max(30).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -55,52 +65,69 @@ export const settingsRouter = createTRPCRouter({
         where: eq(projects.teamId, ctx.teamId),
       });
 
+      const keywords =
+        input.keywords ??
+        (input.description ? extractKeywords(input.description) : undefined);
+
       if (existing) {
         await ctx.db!
           .update(projects)
           .set({
+            name: input.name ?? existing.name,
             siteUrl: input.siteUrl,
             description: input.description || existing.name,
+            keywords: keywords ?? existing.keywords,
             updatedAt: new Date(),
           })
           .where(eq(projects.teamId, ctx.teamId));
       } else {
         await ctx.db!.insert(projects).values({
           teamId: ctx.teamId,
-          name: "Mon projet",
+          name: input.name ?? "Mon projet",
           siteUrl: input.siteUrl,
           description: input.description || "Produit à promouvoir",
+          keywords: keywords ?? [],
         });
+      }
+
+      if (keywords?.length) {
+        const filter = await ctx.db!.query.keywordFilters.findFirst({
+          where: eq(keywordFilters.teamId, ctx.teamId),
+        });
+        if (filter) {
+          await ctx.db!
+            .update(keywordFilters)
+            .set({ keywords, isActive: true })
+            .where(eq(keywordFilters.id, filter.id));
+        }
       }
 
       return { ok: true };
     }),
 
-  updateLanguage: teamProcedure
-    .input(z.object({ responseLanguage: z.enum(["fr", "en"]) }))
-    .mutation(async ({ ctx, input }) => {
-      await ctx.db!
-        .insert(teamSettings)
-        .values({
-          teamId: ctx.teamId,
-          responseLanguage: input.responseLanguage,
+  updateLanguage: teamProcedure.mutation(async ({ ctx }) => {
+    await ctx.db!
+      .insert(teamSettings)
+      .values({
+        teamId: ctx.teamId,
+        responseLanguage: "en",
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: teamSettings.teamId,
+        set: {
+          responseLanguage: "en",
           updatedAt: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: teamSettings.teamId,
-          set: {
-            responseLanguage: input.responseLanguage,
-            updatedAt: new Date(),
-          },
-        });
-      return { ok: true };
-    }),
+        },
+      });
+    return { ok: true };
+  }),
 
   updateFilters: teamProcedure
     .input(
       z.object({
-        subreddits: z.array(z.string()).min(1).max(20),
         keywords: z.array(z.string()).min(1).max(30),
+        subreddits: z.array(z.string()).min(1).max(20),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -108,22 +135,22 @@ export const settingsRouter = createTRPCRouter({
         where: eq(keywordFilters.teamId, ctx.teamId),
       });
 
+      const subreddits = input.subreddits.map((s) => s.replace(/^r\//i, ""));
+
       if (existing) {
         await ctx.db!
           .update(keywordFilters)
           .set({
-            subreddits: input.subreddits.map((s) =>
-              s.replace(/^r\//i, ""),
-            ),
             keywords: input.keywords,
+            subreddits,
             isActive: true,
           })
           .where(eq(keywordFilters.id, existing.id));
       } else {
         await ctx.db!.insert(keywordFilters).values({
           teamId: ctx.teamId,
-          subreddits: input.subreddits.map((s) => s.replace(/^r\//i, "")),
           keywords: input.keywords,
+          subreddits,
           isActive: true,
         });
       }

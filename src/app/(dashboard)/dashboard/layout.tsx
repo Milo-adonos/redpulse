@@ -12,12 +12,11 @@ import {
 import { Logo } from "@/components/brand/logo";
 import { UserMenu } from "@/components/dashboard/user-menu";
 import { ScraperStatus } from "@/components/dashboard/scraper-status";
-import { DashboardSyncBootstrap } from "@/components/dashboard/dashboard-sync-bootstrap";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { href: "/dashboard/replies", label: "Reply & DM", icon: MessageSquare },
+  { href: "/dashboard/replies", label: "Reply", icon: MessageSquare },
   { href: "/dashboard/warmup", label: "Warmup", icon: Flame },
   { href: "/dashboard/team", label: "Team", icon: Users },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
@@ -32,7 +31,6 @@ export default function DashboardLayout({
 
   return (
     <div className="flex min-h-screen bg-background">
-      <DashboardSyncBootstrap />
       <aside className="hidden w-[260px] shrink-0 flex-col border-r border-white/[0.06] bg-[hsl(var(--surface-cold))] md:flex">
         <div className="flex h-16 items-center border-b border-white/[0.06] px-5">
           <Link href="/">

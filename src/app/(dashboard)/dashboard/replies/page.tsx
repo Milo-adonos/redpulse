@@ -1,43 +1,46 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { RedditMessageWorkspace } from "@/components/dashboard/reddit-message-workspace";
 import { api } from "@/trpc/react";
 
 export default function RepliesPage() {
   const [syncError, setSyncError] = useState<string | null>(null);
-  const { data: items = [], isLoading, refetch } = api.messages.list.useQuery(
-    { type: "reply" },
-    { refetchInterval: 60_000 },
-  );
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  const { data: items = [], isLoading, refetch, isFetching } =
+    api.messages.list.useQuery({ type: "reply", unseenOnly: true });
+
   const sync = api.messages.syncReply.useMutation({
-    onSuccess: () => {
+    onSuccess: (result) => {
       setSyncError(null);
-      refetch();
+      setSyncNotice(
+        result.created > 0
+          ? `${result.created} réponse(s) générée(s) — posts ICP dans vos subreddits.`
+          : "Aucun nouveau post ICP — réessayez plus tard ou ajustez vos mots-clés.",
+      );
+      void refetch();
+      setTimeout(() => setSyncNotice(null), 5000);
     },
-    onError: (e) => setSyncError(e.message),
+    onError: (e) => {
+      setSyncNotice(null);
+      setSyncError(e.message);
+    },
   });
   const toggle = api.messages.toggleSent.useMutation({ onSuccess: () => refetch() });
-
-  const bootstrapped = useRef(false);
-  useEffect(() => {
-    if (bootstrapped.current || isLoading) return;
-    if (items.length === 0) {
-      bootstrapped.current = true;
-      sync.mutate();
-    }
-  }, [isLoading, items.length]);
+  const markViewed = api.messages.markViewed.useMutation({ onSuccess: () => refetch() });
 
   return (
     <RedditMessageWorkspace
-      title="Reply & DM"
-      description="Conversations Reddit pertinentes — mises à jour automatiquement toutes les 15 min."
+      title="Reply"
+      description="Posts ICP dans vos subreddits (Settings) — réponses avec mention naturelle de votre produit."
       items={items}
-      isLoading={isLoading}
+      isLoading={isLoading || isFetching}
       isSyncing={sync.isLoading}
       syncError={syncError}
+      syncNotice={syncNotice}
       onSync={() => sync.mutate()}
       onToggleSent={(id, isSent) => toggle.mutate({ id, isSent })}
+      onMarkViewed={(id) => markViewed.mutate({ id })}
     />
   );
 }

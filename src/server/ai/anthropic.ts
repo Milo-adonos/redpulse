@@ -3,7 +3,6 @@ const MODEL_CANDIDATES = [
   process.env.ANTHROPIC_MODEL,
   "claude-haiku-4-5-20251001",
   "claude-sonnet-4-6",
-  "claude-opus-4-8",
 ].filter(Boolean) as string[];
 
 export type ReplyTone = "helpful" | "casual" | "technical";
@@ -13,6 +12,7 @@ export interface GenerateReplyInput {
   postBody?: string;
   subreddit: string;
   productContext: string;
+  productName?: string;
   mentionProduct?: boolean;
   tone?: ReplyTone;
 }
@@ -35,6 +35,8 @@ function computeBanRiskScore(text: string, mentionProduct: boolean): number {
     "limited offer",
     "check out our",
     "best tool ever",
+    "hope this helps",
+    "game changer",
   ];
   const lower = text.toLowerCase();
   for (const word of promoWords) {
@@ -55,23 +57,28 @@ export async function generateRedditReply(
     throw new Error("ANTHROPIC_API_KEY non configurée");
   }
 
-  const tone = input.tone ?? "helpful";
+  const tone = input.tone ?? "casual";
   const mentionProduct = input.mentionProduct ?? true;
+  const productName = input.productName ?? "the product";
 
-  const systemPrompt = `Tu es un expert Reddit qui rédige des commentaires authentiques et utiles.
-Règles strictes:
-- Ton ${tone}, naturel, jamais spammy
-- Maximum 280 caractères si possible, jamais plus de 400
-- Pas plus d'un lien URL
-- Évite le langage promotionnel agressif
-- ${mentionProduct ? `Mentionne subtilement le produit: ${input.productContext}` : "Ne mentionne aucun produit"}
-- Réponds uniquement avec le texte du commentaire, sans guillemets ni préambule`;
+  const systemPrompt = `You write Reddit comments that sound 100% human — indistinguishable from a real r/${input.subreddit} user.
+
+Rules:
+- English only. ${tone} tone.
+- 1-3 short sentences. Max 280 chars preferred.
+- Match how people actually talk on r/${input.subreddit}: casual, direct, sometimes lowercase, contractions ok.
+- NO AI voice: never say "hope this helps", "great question", "I'd recommend checking out", "happy to share", bullet points, or em dashes.
+- NO corporate/marketing speak.
+- ${mentionProduct ? `You can naturally mention ${productName} once if relevant — like a user sharing something that worked, not an ad.` : "Do not mention any product, brand, or URL."}
+- Output ONLY the comment text.`;
 
   const userPrompt = `Subreddit: r/${input.subreddit}
-Titre du post: ${input.postTitle}
-${input.postBody ? `Contenu: ${input.postBody}` : ""}
+Post: ${input.postTitle}
+${input.postBody ? `Body: ${input.postBody.slice(0, 400)}` : ""}
 
-Rédige un commentaire pertinent et humain.`;
+Context about what you might mention: ${input.productContext.slice(0, 300)}
+
+Write one comment like a real community member.`;
 
   let lastError = "";
   let data: { content: Array<{ type: string; text?: string }> } | null = null;
@@ -87,8 +94,8 @@ Rédige un commentaire pertinent et humain.`;
       },
       body: JSON.stringify({
         model,
-        max_tokens: 300,
-        temperature: 0.7,
+        max_tokens: 200,
+        temperature: 0.9,
         system: systemPrompt,
         messages: [{ role: "user", content: userPrompt }],
       }),
@@ -133,7 +140,7 @@ export async function generateWarmupReply(input: {
     postTitle: input.postTitle,
     postBody: input.postBody,
     subreddit: input.subreddit,
-    productContext: "general discussion",
+    productContext: "share a genuine thought or question",
     mentionProduct: false,
     tone: "casual",
   });

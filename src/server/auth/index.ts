@@ -12,6 +12,7 @@ import {
   teamSettings,
 } from "@/server/db/schema";
 import { slugify } from "@/lib/utils";
+import { getUserTeamContext } from "@/server/team/context";
 
 async function ensureGoogleUser(
   email: string,
@@ -62,6 +63,7 @@ async function ensureGoogleUser(
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  trustHost: true,
   session: { strategy: "jwt" },
   pages: {
     signIn: "/login",
@@ -111,7 +113,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
       return true;
     },
-    async jwt({ token, user, account, profile }) {
+    async jwt({ token, user, account, profile, trigger, session }) {
+      if (trigger === "update" && session?.teamId) {
+        token.teamId = session.teamId as string;
+      }
+
       if (account?.provider === "google" && (user?.email || profile?.email)) {
         const email = user?.email ?? (profile as { email?: string })?.email;
         if (email) {
@@ -124,11 +130,24 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
       }
       if (user?.id) token.id = user.id;
+
+      if (db && token.id && (user || trigger === "update")) {
+        const teamCtx = await getUserTeamContext(
+          db,
+          token.id as string,
+          token.teamId as string | undefined,
+        );
+        if (teamCtx) token.teamId = teamCtx.teamId;
+      }
+
       return token;
     },
     async session({ session, token }) {
       if (session.user && token.id) {
         session.user.id = token.id as string;
+        if (token.teamId) {
+          session.user.teamId = token.teamId as string;
+        }
       }
       return session;
     },

@@ -3,16 +3,17 @@ import {
   generateWarmupReply,
 } from "@/server/ai/anthropic";
 
-export type ResponseLanguage = "fr" | "en";
+export type ResponseLanguage = "en";
 
 export interface ReplyMessageInput {
   postTitle: string;
   postBody?: string;
   subreddit: string;
   productContext: string;
+  productName?: string;
   siteUrl?: string;
   mentionSite: boolean;
-  language: ResponseLanguage;
+  language?: ResponseLanguage;
 }
 
 function banRiskToSafetyScore(banRiskScore: number): number {
@@ -29,20 +30,21 @@ function cleanHumanText(body: string): string {
 }
 
 export async function generateReplyMessage(input: ReplyMessageInput) {
-  const langNote =
-    input.language === "en"
-      ? "Write in English."
-      : "Écris en français naturel.";
-
-  const mentionNote = input.mentionSite
-    ? `Tu peux mentionner le site ou le produit (${input.siteUrl ?? input.productContext}) de façon légère.`
-    : `Ne donne pas le nom du produit ni d'URL. Dis plutôt que tu as trouvé un outil qui fait ça.`;
+  const productName =
+    input.productName?.trim() ||
+    input.siteUrl
+      ?.replace(/^https?:\/\/(www\.)?/, "")
+      .split("/")[0]
+      ?.replace(/\.(app|com|io|co|net|org)$/i, "")
+      .split(".")[0] ||
+    "the tool";
 
   const result = await generateRedditReply({
     postTitle: input.postTitle,
     postBody: input.postBody,
     subreddit: input.subreddit,
-    productContext: `${input.productContext}. ${langNote} ${mentionNote} Pas de tirets, pas de listes, pas de formatage IA. Écris comme un humain sur Reddit.`,
+    productContext: input.productContext,
+    productName,
     mentionProduct: input.mentionSite,
     tone: "casual",
   });
@@ -58,13 +60,8 @@ export async function generateWarmupMessage(input: {
   postTitle: string;
   postBody?: string;
   subreddit: string;
-  language: ResponseLanguage;
+  language?: ResponseLanguage;
 }) {
-  const langNote =
-    input.language === "en"
-      ? "Write in English."
-      : "Écris en français naturel.";
-
   const result = await generateWarmupReply({
     postTitle: input.postTitle,
     postBody: input.postBody,
@@ -72,9 +69,7 @@ export async function generateWarmupMessage(input: {
   });
 
   return {
-    body: cleanHumanText(
-      `${result.body} ${langNote} Apporte de la valeur, pose une question ou partage une expérience. Aucune mention de produit.`,
-    ).slice(0, 500),
+    body: cleanHumanText(result.body),
     safetyScore: banRiskToSafetyScore(result.banRiskScore),
     model: result.model,
   };

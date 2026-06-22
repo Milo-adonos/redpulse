@@ -11,7 +11,7 @@
     "lint": "next lint",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "db:migrate": "node scripts/run-migration-003.mjs",
+    "db:migrate": "node scripts/run-migrations.mjs",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {

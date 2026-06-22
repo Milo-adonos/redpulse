@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, or } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, teamProcedure } from "@/server/api/trpc";
 import {
@@ -18,9 +18,18 @@ import { checkRateLimit } from "@/server/rate-limit";
 export const dmRouter = createTRPCRouter({
   list: teamProcedure.query(async ({ ctx }) => {
     const rows = await ctx.db!.query.directMessages.findMany({
-      where: eq(directMessages.teamId, ctx.teamId),
+      where: and(
+        eq(directMessages.teamId, ctx.teamId),
+        or(
+          eq(directMessages.status, "draft"),
+          eq(directMessages.status, "pending_review"),
+        ),
+      ),
       orderBy: [desc(directMessages.createdAt)],
       limit: 50,
+      with: {
+        discoveredPost: true,
+      },
     });
 
     return rows.map((dm) => ({
@@ -33,6 +42,10 @@ export const dmRouter = createTRPCRouter({
       body: dm.body,
       status: dm.status,
       recipientUsername: dm.recipientUsername,
+      subreddit: dm.discoveredPost?.subreddit ?? "",
+      postTitle: dm.discoveredPost?.title ?? dm.subject,
+      permalink: dm.discoveredPost?.permalink ?? "",
+      author: dm.recipientUsername,
     }));
   }),
 

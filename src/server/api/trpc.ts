@@ -95,7 +95,11 @@ export const teamProcedure = protectedProcedure.use(async ({ ctx, next }) => {
   }
 
   const { getUserTeamContext } = await import("@/server/team/context");
-  const teamCtx = await getUserTeamContext(ctx.db, ctx.session.user.id);
+  const teamCtx = await getUserTeamContext(
+    ctx.db,
+    ctx.session.user.id,
+    ctx.session.user.teamId,
+  );
 
   if (!teamCtx) {
     throw new TRPCError({

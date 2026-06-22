@@ -3,37 +3,143 @@ import type { Database } from "@/server/db";
 import {
   discoveredPosts,
   keywordFilters,
+  projects,
   teams,
 } from "@/server/db/schema";
 import {
+  buildRedditPostUrl,
   estimateIntentScore,
   fetchSubredditPosts,
+  isRelevantToIcp,
   matchKeywords,
 } from "@/server/reddit/client";
+import { redditDateFromUnix } from "@/server/reddit/freshness";
+import {
+  discoverSubredditsForProduct,
+  expandKeywords,
+} from "@/server/reddit/subreddit-discovery";
 
-const DEFAULT_SUBREDDITS = ["SaaS", "startups", "marketing", "entrepreneur"];
-const DEFAULT_KEYWORDS = [
-  "saas",
-  "marketing",
-  "automation",
-  "growth",
-  "reddit",
-  "tool",
-  "startup",
-];
+export function buildTeamKeywords(
+  filterKeywords: string[] | undefined,
+  project: {
+    keywords?: string[] | null;
+    description?: string | null;
+    name?: string | null;
+  } | null,
+): string[] {
+  return expandKeywords(
+    [...(filterKeywords ?? []), ...(project?.keywords ?? [])],
+    project?.name ?? "",
+    project?.description ?? "",
+  ).slice(0, 20);
+}
 
-export async function scrapeTeamDiscovery(db: Database, teamId: string) {
-  const filter = await db.query.keywordFilters.findFirst({
-    where: and(
-      eq(keywordFilters.teamId, teamId),
-      eq(keywordFilters.isActive, true),
-    ),
+async function persistDiscoveredSubreddits(
+  db: Database,
+  teamId: string,
+  subreddits: string[],
+  keywords: string[],
+) {
+  const existing = await db.query.keywordFilters.findFirst({
+    where: eq(keywordFilters.teamId, teamId),
   });
 
-  const subreddits =
-    filter?.subreddits?.length ? filter.subreddits : DEFAULT_SUBREDDITS;
-  const keywords =
-    filter?.keywords?.length ? filter.keywords : DEFAULT_KEYWORDS;
+  if (existing) {
+    await db
+      .update(keywordFilters)
+      .set({ subreddits, keywords, isActive: true })
+      .where(eq(keywordFilters.id, existing.id));
+    return;
+  }
+
+  await db.insert(keywordFilters).values({
+    teamId,
+    keywords,
+    subreddits,
+    isActive: true,
+  });
+}
+
+async function discoverForTeam(
+  db: Database,
+  teamId: string,
+  limit = 10,
+): Promise<string[]> {
+  const [filter, project] = await Promise.all([
+    db.query.keywordFilters.findFirst({
+      where: and(
+        eq(keywordFilters.teamId, teamId),
+        eq(keywordFilters.isActive, true),
+      ),
+    }),
+    db.query.projects.findFirst({
+      where: eq(projects.teamId, teamId),
+    }),
+  ]);
+
+  const keywords = buildTeamKeywords(filter?.keywords, project ?? null);
+
+  return discoverSubredditsForProduct({
+    keywords,
+    productName: project?.name,
+    description: project?.description,
+    seedSubreddits: filter?.subreddits ?? [],
+    limit,
+  });
+}
+
+export async function refreshTeamSubreddits(db: Database, teamId: string) {
+  const [filter, project] = await Promise.all([
+    db.query.keywordFilters.findFirst({
+      where: eq(keywordFilters.teamId, teamId),
+    }),
+    db.query.projects.findFirst({
+      where: eq(projects.teamId, teamId),
+    }),
+  ]);
+
+  const keywords = buildTeamKeywords(filter?.keywords, project ?? null);
+  const subreddits = await discoverSubredditsForProduct({
+    keywords,
+    productName: project?.name,
+    description: project?.description,
+    seedSubreddits: filter?.subreddits ?? [],
+    limit: 10,
+    fast: true,
+  });
+
+  await persistDiscoveredSubreddits(db, teamId, subreddits, keywords);
+  return subreddits;
+}
+
+export async function getTeamTargeting(db: Database, teamId: string) {
+  const [filter, project] = await Promise.all([
+    db.query.keywordFilters.findFirst({
+      where: and(
+        eq(keywordFilters.teamId, teamId),
+        eq(keywordFilters.isActive, true),
+      ),
+    }),
+    db.query.projects.findFirst({
+      where: eq(projects.teamId, teamId),
+    }),
+  ]);
+
+  const keywords = buildTeamKeywords(filter?.keywords, project ?? null);
+
+  const subreddits = filter?.subreddits?.length
+    ? filter.subreddits.map((s) => s.replace(/^r\//i, ""))
+    : await discoverForTeam(db, teamId, 10);
+
+  if (!filter?.subreddits?.length) {
+    await persistDiscoveredSubreddits(db, teamId, subreddits, keywords);
+  }
+
+  return { subreddits, keywords };
+}
+
+export async function scrapeTeamDiscovery(db: Database, teamId: string) {
+  const { subreddits, keywords } = await getTeamTargeting(db, teamId);
 
   let inserted = 0;
   let lastError: Error | null = null;
@@ -42,16 +148,28 @@ export async function scrapeTeamDiscovery(db: Database, teamId: string) {
   for (const sub of subreddits) {
     let posts;
     try {
-      posts = await fetchSubredditPosts(sub, 15);
-      fetchedAny = true;
+      posts = await fetchSubredditPosts(sub, 20, "new");
+      if (posts.length > 0) fetchedAny = true;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       console.error(`[scraper] r/${sub}:`, error);
       continue;
     }
 
-    for (const post of posts.slice(0, 12)) {
+    for (const post of posts) {
       const combined = `${post.title} ${post.selftext ?? ""}`;
+      if (
+        !isRelevantToIcp(
+          post.title,
+          post.selftext ?? "",
+          keywords,
+          subreddits,
+          post.subreddit,
+        )
+      ) {
+        continue;
+      }
+
       const matched = matchKeywords(combined, keywords);
       const intentScore = estimateIntentScore(
         post.title,
@@ -72,9 +190,15 @@ export async function scrapeTeamDiscovery(db: Database, teamId: string) {
             score: post.score,
             numComments: post.num_comments,
             url: post.url,
-            permalink: `https://reddit.com${post.permalink}`,
+            permalink: buildRedditPostUrl(
+              post.subreddit,
+              post.id,
+              post.permalink,
+              post.url,
+            ),
             matchedKeywords: matched,
             intentScore: String(intentScore),
+            discoveredAt: redditDateFromUnix(post.created_utc),
           })
           .onConflictDoNothing();
         inserted++;
@@ -85,7 +209,7 @@ export async function scrapeTeamDiscovery(db: Database, teamId: string) {
   }
 
   if (!fetchedAny && lastError) {
-    throw lastError;
+    console.warn(`[scraper] team ${teamId}:`, lastError.message);
   }
 
   return { inserted, subreddits: subreddits.length };

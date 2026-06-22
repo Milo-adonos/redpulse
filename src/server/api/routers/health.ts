@@ -26,6 +26,9 @@ export const healthRouter = createTRPCRouter({
     anthropic: !!process.env.ANTHROPIC_API_KEY,
     database: !!process.env.DATABASE_URL,
     google: !!(process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET),
-    reddit: !!(process.env.REDDIT_CLIENT_ID && process.env.REDDIT_CLIENT_SECRET),
+    redditLive: true,
+    redditPublish: !!(
+      process.env.REDDIT_CLIENT_ID && process.env.REDDIT_CLIENT_SECRET
+    ),
   })),
 });

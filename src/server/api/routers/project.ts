@@ -3,74 +3,22 @@ import { createTRPCRouter, publicProcedure, teamProcedure } from "@/server/api/t
 import { projectDrafts, projects } from "@/server/db/schema";
 import { eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import {
+  analyzeProductFromSite,
+  extractKeywords,
+} from "@/server/project/site-analysis";
 
-async function fetchSiteMetadata(url: string) {
-  const normalized = url.startsWith("http") ? url : `https://${url}`;
-  const res = await fetch(normalized, {
-    headers: { "User-Agent": "RedPulse/1.0 (+https://redpulse.app)" },
-    signal: AbortSignal.timeout(10000),
-    next: { revalidate: 0 },
-  });
-
-  if (!res.ok) throw new Error(`Impossible d'accéder au site (${res.status})`);
-
-  const html = await res.text();
-  const pick = (pattern: RegExp) => html.match(pattern)?.[1]?.trim();
-
-  const title =
-    pick(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) ??
-    pick(/<title[^>]*>([^<]+)<\/title>/i) ??
-    new URL(normalized).hostname;
-
-  const description =
-    pick(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i) ??
-    pick(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i) ??
-    "";
-
-  return { title, description, url: normalized };
+function normalizeSiteUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) throw new Error("URL du site requise");
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  new URL(withProtocol);
+  return withProtocol;
 }
 
-async function summarizeProduct(title: string, description: string, url: string) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return `${title} — ${description || "Produit SaaS promu via RedPulse."} (${url})`;
-  }
-
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5-20251001",
-      max_tokens: 400,
-      messages: [
-        {
-          role: "user",
-          content: `Analyse ce produit SaaS et rédige une description marketing concise (3-4 phrases, ton professionnel mais humain, en français) pour guider des réponses Reddit naturelles.
-
-Titre: ${title}
-Description site: ${description || "non disponible"}
-URL: ${url}
-
-Réponds uniquement avec la description, sans titre ni préambule.`,
-        },
-      ],
-    }),
-  });
-
-  if (!res.ok) {
-    return `${title}. ${description}`.trim();
-  }
-
-  const data = (await res.json()) as {
-    content: Array<{ type: string; text?: string }>;
-  };
-  return (
-    data.content.find((b) => b.type === "text")?.text?.trim() ??
-    `${title}. ${description}`.trim()
+function parseInviteEmails(raw: string[] | undefined): string[] {
+  return [...new Set((raw ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean))].filter(
+    (email) => z.string().email().safeParse(email).success,
   );
 }
 
@@ -78,23 +26,13 @@ export const projectRouter = createTRPCRouter({
   analyzeSite: publicProcedure
     .input(z.object({ url: z.string().min(3).max(500) }))
     .mutation(async ({ input }) => {
-      const meta = await fetchSiteMetadata(input.url);
-      const suggestedDescription = await summarizeProduct(
-        meta.title,
-        meta.description,
-        meta.url,
-      );
-      return {
-        ...meta,
-        suggestedDescription,
-        keywords: extractKeywords(suggestedDescription),
-      };
+      return analyzeProductFromSite(input.url);
     }),
 
   enrichDescription: publicProcedure
     .input(
       z.object({
-        description: z.string().min(10).max(2000),
+        description: z.string().min(10).max(4000),
         productName: z.string().optional(),
       }),
     )
@@ -113,14 +51,14 @@ export const projectRouter = createTRPCRouter({
         },
         body: JSON.stringify({
           model: process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5-20251001",
-          max_tokens: 500,
+          max_tokens: 800,
           messages: [
             {
               role: "user",
-              content: `Optimise cette description produit pour Reddit marketing (naturel, pas spammy, français). Retourne JSON: {"description":"...","suggestions":["angle 1","angle 2","angle 3"]}
+              content: `Improve this SaaS product brief for Reddit marketing AI (English, detailed, natural). Return JSON: {"description":"...","suggestions":["angle 1","angle 2","angle 3"]}
 
-Produit: ${input.productName ?? "SaaS"}
-Description actuelle: ${input.description}`,
+Product: ${input.productName ?? "SaaS"}
+Current brief: ${input.description}`,
             },
           ],
         }),
@@ -135,11 +73,10 @@ Description actuelle: ${input.description}`,
       };
       const raw = data.content.find((b) => b.type === "text")?.text ?? "";
       try {
-        const json = JSON.parse(raw) as {
+        return JSON.parse(raw.replace(/^```json\s*|\s*```$/g, "").trim()) as {
           description: string;
           suggestions: string[];
         };
-        return json;
       } catch {
         return { description: raw || input.description, suggestions: [] };
       }
@@ -149,9 +86,11 @@ Description actuelle: ${input.description}`,
     .input(
       z.object({
         projectName: z.string().min(2).max(100),
-        siteUrl: z.string().url(),
-        description: z.string().max(2000).default(""),
-        invites: z.array(z.string().email()).max(10).default([]),
+        siteUrl: z.string().min(3).max(500),
+        description: z.string().max(4000).default(""),
+        keywords: z.array(z.string()).max(30).default([]),
+        subreddits: z.array(z.string()).max(20).default([]),
+        invites: z.array(z.string()).max(10).default([]),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -162,40 +101,46 @@ Description actuelle: ${input.description}`,
         });
       }
 
+      let siteUrl: string;
+      try {
+        siteUrl = normalizeSiteUrl(input.siteUrl);
+      } catch {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "URL du site invalide — vérifiez le format (ex. https://votre-site.com)",
+        });
+      }
+
       const draftToken = crypto.randomUUID().replace(/-/g, "");
       const expires = new Date();
       expires.setDate(expires.getDate() + 7);
 
+      const keywords =
+        input.keywords.length > 0
+          ? input.keywords
+          : extractKeywords(input.description || input.projectName);
+      const subreddits = input.subreddits.map((s) => s.replace(/^r\//i, ""));
+      const invites = parseInviteEmails(input.invites);
+
       await ctx.db.insert(projectDrafts).values({
         draftToken,
         projectName: input.projectName,
-        siteUrl: input.siteUrl,
+        siteUrl,
         description: input.description || input.projectName,
-        invites: input.invites,
+        keywords,
+        subreddits,
+        invites,
         expiresAt: expires,
       });
-
-      if (ctx.session?.user?.id) {
-        const { getUserTeamContext, activateProjectDraft } = await import(
-          "@/server/team/context"
-        );
-        const teamCtx = await getUserTeamContext(ctx.db, ctx.session.user.id);
-        if (teamCtx) {
-          await activateProjectDraft(
-            ctx.db,
-            ctx.session.user.id,
-            teamCtx.teamId,
-            draftToken,
-          );
-        }
-      }
 
       return {
         draftToken,
         projectName: input.projectName,
-        siteUrl: input.siteUrl,
+        siteUrl,
         description: input.description,
-        invites: input.invites,
+        keywords,
+        subreddits,
+        invites,
         message: "Projet enregistré — créez votre compte pour l'activer.",
       };
     }),
@@ -206,12 +151,3 @@ Description actuelle: ${input.description}`,
     });
   }),
 });
-
-function extractKeywords(text: string): string[] {
-  const words = text
-    .toLowerCase()
-    .replace(/[^\w\sàâäéèêëïîôùûüç-]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length > 4);
-  return [...new Set(words)].slice(0, 8);
-}

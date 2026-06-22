@@ -43,8 +43,10 @@ interface RedditMessageWorkspaceProps {
   isLoading: boolean;
   isSyncing: boolean;
   syncError?: string | null;
+  syncNotice?: string | null;
   onSync: () => void;
   onToggleSent: (id: string, isSent: boolean) => void;
+  onMarkViewed: (id: string) => void;
 }
 
 export function RedditMessageWorkspace({
@@ -54,24 +56,36 @@ export function RedditMessageWorkspace({
   isLoading,
   isSyncing,
   syncError,
+  syncNotice,
   onSync,
   onToggleSent,
+  onMarkViewed,
 }: RedditMessageWorkspaceProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (items.length && !selectedId) {
+    if (!items.length) {
+      setSelectedId(null);
+      return;
+    }
+    if (!selectedId || !items.some((item) => item.id === selectedId)) {
       setSelectedId(items[0]!.id);
     }
   }, [items, selectedId]);
 
   const selected = items.find((i) => i.id === selectedId) ?? items[0];
 
-  async function copyMessage(text: string) {
+  async function copyMessage(text: string, id: string) {
     await navigator.clipboard.writeText(text);
     setCopied(true);
+    onMarkViewed(id);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  function openRedditLink(url: string, id: string) {
+    onMarkViewed(id);
+    window.open(url, "_blank", "noopener,noreferrer");
   }
 
   return (
@@ -87,9 +101,15 @@ export function RedditMessageWorkspace({
           disabled={isSyncing}
           className="shrink-0 rounded-full border border-white/10 px-5 py-2.5 text-[13px] text-white/70 transition-colors hover:border-primary/30 hover:text-white disabled:opacity-50"
         >
-          {isSyncing ? "Génération…" : "↻ Actualiser"}
+          {isSyncing ? "Actualisation…" : "↻ Actualiser"}
         </button>
       </div>
+
+      {syncNotice && (
+        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-[13px] text-emerald-300/90">
+          {syncNotice}
+        </div>
+      )}
 
       {syncError && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-[13px] text-red-300/90">
@@ -103,9 +123,9 @@ export function RedditMessageWorkspace({
         </div>
       ) : items.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-white/10 py-20 text-center">
-          <p className="text-lg font-medium text-white/60">Aucun message pour l&apos;instant</p>
+          <p className="text-lg font-medium text-white/60">Aucun nouveau message</p>
           <p className="mt-2 text-sm text-white/35">
-            Cliquez sur Actualiser pour détecter des posts et générer des réponses.
+            Cliquez sur Actualiser pour détecter de nouveaux posts Reddit.
           </p>
         </div>
       ) : (
@@ -137,15 +157,24 @@ export function RedditMessageWorkspace({
                       <span>·</span>
                       <span>Pertinence {relevanceLabel(item.relevanceScore)}</span>
                     </div>
-                    <a
-                      href={item.permalink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="mt-2 block text-[14px] font-medium leading-snug text-white/90 hover:text-primary"
+                    <span
+                      role="link"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openRedditLink(item.permalink, item.id);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          openRedditLink(item.permalink, item.id);
+                        }
+                      }}
+                      className="mt-2 block cursor-pointer text-[14px] font-medium leading-snug text-white/90 hover:text-primary"
                     >
                       {item.title}
-                    </a>
+                    </span>
                   </button>
                   <div className="border-t border-white/[0.04] px-4 py-3">
                     <p className="text-[13px] leading-relaxed text-white/65">
@@ -161,6 +190,13 @@ export function RedditMessageWorkspace({
                         />
                         Message envoyé
                       </label>
+                      <button
+                        type="button"
+                        onClick={() => onMarkViewed(item.id)}
+                        className="text-[12px] text-white/40 hover:text-white/70"
+                      >
+                        Marquer comme lu
+                      </button>
                       <span
                         className={cn(
                           "rounded-full px-2 py-0.5 text-[10px]",
@@ -187,15 +223,14 @@ export function RedditMessageWorkspace({
                 <span>·</span>
                 <span>{timeAgo(selected.redditCreatedAt ?? selected.createdAt)}</span>
               </div>
-              <a
-                href={selected.permalink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-3 flex items-start gap-2 text-lg font-medium leading-snug text-white hover:text-primary"
+              <button
+                type="button"
+                onClick={() => openRedditLink(selected.permalink, selected.id)}
+                className="mt-3 flex w-full items-start gap-2 text-left text-lg font-medium leading-snug text-white hover:text-primary"
               >
                 {selected.title}
                 <ExternalLink className="mt-1 h-4 w-4 shrink-0 opacity-50" />
-              </a>
+              </button>
               {selected.postBody && (
                 <p className="mt-4 line-clamp-6 text-[13px] leading-relaxed text-white/45">
                   {selected.postBody}
@@ -208,7 +243,7 @@ export function RedditMessageWorkspace({
                   </p>
                   <button
                     type="button"
-                    onClick={() => copyMessage(selected.generatedBody)}
+                    onClick={() => copyMessage(selected.generatedBody, selected.id)}
                     className="flex items-center gap-1.5 text-[12px] text-primary hover:text-primary/80"
                   >
                     {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
@@ -229,6 +264,13 @@ export function RedditMessageWorkspace({
                   />
                   Message envoyé
                 </label>
+                <button
+                  type="button"
+                  onClick={() => onMarkViewed(selected.id)}
+                  className="text-[13px] text-white/45 hover:text-white/75"
+                >
+                  Marquer comme lu
+                </button>
                 <span className="text-[12px] text-white/40">
                   Pertinence {relevanceLabel(selected.relevanceScore)}
                 </span>

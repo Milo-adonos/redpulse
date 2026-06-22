@@ -13,7 +13,6 @@ import {
 } from "@/server/db/schema";
 import { slugify } from "@/lib/utils";
 import { activateProjectDraft, claimPendingInvitesForEmail } from "@/server/team/context";
-import { runFullTeamSync } from "@/server/jobs/sync-team";
 
 export const authRouter = createTRPCRouter({
   signup: publicProcedure
@@ -88,13 +87,19 @@ export const authRouter = createTRPCRouter({
       await claimPendingInvitesForEmail(ctx.db, user!.id, input.email);
 
       if (input.draftToken) {
-        await activateProjectDraft(
-          ctx.db,
-          user!.id,
-          team!.id,
-          input.draftToken,
-        );
-        runFullTeamSync(ctx.db, team!.id, user!.id).catch(() => {});
+        try {
+          const activated = await activateProjectDraft(
+            ctx.db,
+            user!.id,
+            team!.id,
+            input.draftToken,
+          );
+          if (!activated) {
+            console.warn(`[signup] draft not activated: ${input.draftToken}`);
+          }
+        } catch (error) {
+          console.error("[signup] activateProjectDraft:", error);
+        }
       } else {
         await ctx.db.insert(keywordFilters).values({
           teamId: team!.id,
@@ -108,6 +113,7 @@ export const authRouter = createTRPCRouter({
         userId: user!.id,
         teamId: team!.id,
         email: user!.email,
+        draftActivated: !!input.draftToken,
       };
     }),
 });

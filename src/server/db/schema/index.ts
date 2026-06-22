@@ -162,6 +162,8 @@ export const projectDrafts = pgTable("project_drafts", {
   projectName: varchar("project_name", { length: 255 }).notNull(),
   siteUrl: text("site_url").notNull(),
   description: text("description").notNull(),
+  keywords: jsonb("keywords").$type<string[]>().default([]),
+  subreddits: jsonb("subreddits").$type<string[]>().default([]),
   invites: jsonb("invites").$type<string[]>().default([]),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -235,6 +237,7 @@ export const generatedMessages = pgTable(
     sentByUserId: uuid("sent_by_user_id").references(() => users.id),
     generatedByUserId: uuid("generated_by_user_id").references(() => users.id),
     redditCreatedAt: timestamp("reddit_created_at", { withTimezone: true }),
+    viewedAt: timestamp("viewed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -450,6 +453,13 @@ export const discoveredPostsRelations = relations(
 export const commentsRelations = relations(comments, ({ one }) => ({
   discoveredPost: one(discoveredPosts, {
     fields: [comments.discoveredPostId],
+    references: [discoveredPosts.id],
+  }),
+}));
+
+export const directMessagesRelations = relations(directMessages, ({ one }) => ({
+  discoveredPost: one(discoveredPosts, {
+    fields: [directMessages.discoveredPostId],
     references: [discoveredPosts.id],
   }),
 }));

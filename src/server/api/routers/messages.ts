@@ -1,13 +1,16 @@
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gte, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, teamProcedure } from "@/server/api/trpc";
 import { generatedMessages } from "@/server/db/schema";
+import { buildRedditPostUrl } from "@/server/reddit/client";
+import { getMaxPostAgeDate } from "@/server/reddit/freshness";
 import {
-  runFullTeamSync,
   syncTeamReplies,
   syncTeamWarmup,
 } from "@/server/jobs/sync-team";
+import { getTeamTargeting } from "@/server/reddit/scraper";
+import { isInTargetSubreddit, isRelevantToIcp } from "@/server/reddit/client";
 
 function formatMessage(row: typeof generatedMessages.$inferSelect) {
   return {
@@ -17,7 +20,11 @@ function formatMessage(row: typeof generatedMessages.$inferSelect) {
     subreddit: row.subreddit,
     title: row.title,
     author: row.author ?? "unknown",
-    permalink: row.permalink,
+    permalink: buildRedditPostUrl(
+      row.subreddit,
+      row.redditId,
+      row.permalink,
+    ),
     postBody: row.postBody,
     generatedBody: row.generatedBody,
     relevanceScore: row.relevanceScore ? Number(row.relevanceScore) : null,
@@ -31,42 +38,62 @@ function formatMessage(row: typeof generatedMessages.$inferSelect) {
 
 export const messagesRouter = createTRPCRouter({
   list: teamProcedure
-    .input(z.object({ type: z.enum(["reply", "warmup"]) }))
+    .input(
+      z.object({
+        type: z.enum(["reply", "warmup"]),
+        unseenOnly: z.boolean().default(true),
+      }),
+    )
     .query(async ({ ctx, input }) => {
+      const targeting = await getTeamTargeting(ctx.db!, ctx.teamId);
+      const { keywords, subreddits } = targeting;
+
+      const conditions = [
+        eq(generatedMessages.teamId, ctx.teamId),
+        eq(generatedMessages.type, input.type),
+        gte(generatedMessages.createdAt, getMaxPostAgeDate()),
+      ];
+
+      if (input.unseenOnly) {
+        conditions.push(isNull(generatedMessages.viewedAt));
+      }
+
       const rows = await ctx.db!.query.generatedMessages.findMany({
-        where: and(
-          eq(generatedMessages.teamId, ctx.teamId),
-          eq(generatedMessages.type, input.type),
-        ),
+        where: and(...conditions),
         orderBy: [
           desc(generatedMessages.relevanceScore),
+          desc(generatedMessages.redditCreatedAt),
           desc(generatedMessages.createdAt),
         ],
       });
-      return rows.map(formatMessage);
+
+      return rows
+        .filter(
+          (row) =>
+            isInTargetSubreddit(row.subreddit, subreddits) &&
+            isRelevantToIcp(
+              row.title,
+              row.postBody ?? "",
+              keywords,
+              subreddits,
+              row.subreddit,
+            ),
+        )
+        .map(formatMessage);
     }),
 
   syncReply: teamProcedure.mutation(async ({ ctx }) => {
     return syncTeamReplies(ctx.db!, ctx.teamId, {
       userId: ctx.session.user.id,
+      maxNew: 8,
     });
   }),
 
   syncWarmup: teamProcedure.mutation(async ({ ctx }) => {
     return syncTeamWarmup(ctx.db!, ctx.teamId, {
       userId: ctx.session.user.id,
+      maxNew: 5,
     });
-  }),
-
-  syncAll: teamProcedure.mutation(async ({ ctx }) => {
-    const result = await runFullTeamSync(ctx.db!, ctx.teamId, ctx.session.user.id);
-    if (result.redditError) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: result.redditError,
-      });
-    }
-    return result;
   }),
 
   toggleSent: teamProcedure
@@ -94,9 +121,32 @@ export const messagesRouter = createTRPCRouter({
           isSent: input.isSent,
           sentAt: input.isSent ? new Date() : null,
           sentByUserId: input.isSent ? ctx.session.user.id : null,
+          viewedAt: input.isSent ? new Date() : row.viewedAt,
         })
         .where(eq(generatedMessages.id, input.id));
 
       return { id: input.id, isSent: input.isSent };
+    }),
+
+  markViewed: teamProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const row = await ctx.db!.query.generatedMessages.findFirst({
+        where: and(
+          eq(generatedMessages.id, input.id),
+          eq(generatedMessages.teamId, ctx.teamId),
+        ),
+      });
+
+      if (!row) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      await ctx.db!
+        .update(generatedMessages)
+        .set({ viewedAt: new Date() })
+        .where(eq(generatedMessages.id, input.id));
+
+      return { id: input.id };
     }),
 });

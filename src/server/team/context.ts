@@ -1,30 +1,51 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { Database } from "@/server/db";
-import { teamInvites, teamMembers, users } from "@/server/db/schema";
+import { teamInvites, teamMembers, teams, users } from "@/server/db/schema";
 import type { roleEnum } from "@/server/db/schema";
+import { extractKeywords } from "@/server/project/site-analysis";
+import { inferSubredditsFromText } from "@/server/reddit/subreddit-discovery";
 
 type Role = (typeof roleEnum.enumValues)[number];
 
 export async function getUserTeamContext(
   db: Database,
   userId: string,
+  preferredTeamId?: string | null,
 ): Promise<{ teamId: string; role: Role } | null> {
+  if (preferredTeamId) {
+    const preferred = await db.query.teamMembers.findFirst({
+      where: and(
+        eq(teamMembers.teamId, preferredTeamId),
+        eq(teamMembers.userId, userId),
+      ),
+    });
+    if (preferred) {
+      return { teamId: preferred.teamId, role: preferred.role };
+    }
+  }
+
   const memberships = await db.query.teamMembers.findMany({
     where: eq(teamMembers.userId, userId),
+    with: { team: true },
   });
 
   if (!memberships.length) return null;
 
-  const priority: Record<Role, number> = {
+  const rolePriority: Record<Role, number> = {
     owner: 4,
     admin: 3,
     editor: 2,
     viewer: 1,
   };
 
-  const best = memberships.sort(
-    (a, b) => priority[b.role] - priority[a.role],
-  )[0]!;
+  const owned = memberships.filter((m) => m.role === "owner");
+  const pool = owned.length ? owned : memberships;
+
+  const best = pool.sort((a, b) => {
+    const roleDiff = rolePriority[b.role] - rolePriority[a.role];
+    if (roleDiff !== 0) return roleDiff;
+    return b.team.createdAt.getTime() - a.team.createdAt.getTime();
+  })[0]!;
 
   return { teamId: best.teamId, role: best.role };
 }
@@ -48,6 +69,23 @@ export async function activateProjectDraft(
 
   if (!draft) return null;
 
+  const owner = await db.query.teamMembers.findFirst({
+    where: and(eq(teamMembers.teamId, teamId), eq(teamMembers.role, "owner")),
+  });
+
+  if (!owner || owner.userId !== userId) {
+    return null;
+  }
+
+  const keywords =
+    draft.keywords?.length ? draft.keywords : extractKeywords(draft.description);
+  const subreddits = draft.subreddits?.length
+    ? draft.subreddits.map((s) => s.replace(/^r\//i, ""))
+    : inferSubredditsFromText(
+        `${draft.projectName} ${draft.description}`,
+        10,
+      );
+
   await db
     .insert(projects)
     .values({
@@ -55,7 +93,7 @@ export async function activateProjectDraft(
       name: draft.projectName,
       siteUrl: draft.siteUrl,
       description: draft.description,
-      keywords: extractKeywords(draft.description),
+      keywords,
     })
     .onConflictDoUpdate({
       target: projects.teamId,
@@ -63,26 +101,42 @@ export async function activateProjectDraft(
         name: draft.projectName,
         siteUrl: draft.siteUrl,
         description: draft.description,
-        keywords: extractKeywords(draft.description),
+        keywords,
         updatedAt: new Date(),
       },
     });
 
+  await db
+    .update(teams)
+    .set({ name: draft.projectName, updatedAt: new Date() })
+    .where(eq(teams.id, teamId));
+
   await db.insert(teamSettings).values({ teamId }).onConflictDoNothing();
 
-  await db.insert(keywordFilters).values({
-    teamId,
-    keywords: extractKeywords(draft.description),
-    subreddits: ["SaaS", "startups", "marketing", "entrepreneur", "growth"],
-    isActive: true,
+  const existingFilter = await db.query.keywordFilters.findFirst({
+    where: eq(keywordFilters.teamId, teamId),
   });
+
+  if (existingFilter) {
+    await db
+      .update(keywordFilters)
+      .set({ keywords, subreddits, isActive: true })
+      .where(eq(keywordFilters.id, existingFilter.id));
+  } else {
+    await db.insert(keywordFilters).values({
+      teamId,
+      keywords,
+      subreddits,
+      isActive: true,
+    });
+  }
 
   for (const email of draft.invites ?? []) {
     await processTeamInvite(db, teamId, email, userId, "viewer");
   }
 
   await db.delete(projectDrafts).where(eq(projectDrafts.id, draft.id));
-  return draft;
+  return { ...draft, teamId };
 }
 
 export async function processTeamInvite(
@@ -164,13 +218,4 @@ export async function claimPendingInvitesForEmail(
   }
 
   return invites.length;
-}
-
-function extractKeywords(text: string): string[] {
-  const words = text
-    .toLowerCase()
-    .replace(/[^\w\sàâäéèêëïîôùûüç-]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length > 4);
-  return [...new Set(words)].slice(0, 12);
 }
