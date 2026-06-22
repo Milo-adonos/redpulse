@@ -1,0 +1,245 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { ExternalLink, Copy, Check } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+export type MessageItem = {
+  id: string;
+  subreddit: string;
+  title: string;
+  author: string;
+  permalink: string;
+  postBody?: string | null;
+  generatedBody: string;
+  relevanceScore: number | null;
+  safetyScore: number;
+  isSent: boolean;
+  createdAt: Date | string;
+  redditCreatedAt?: Date | string | null;
+};
+
+function timeAgo(date: Date | string | null | undefined): string {
+  if (!date) return "—";
+  const then = new Date(date).getTime();
+  const diff = Date.now() - then;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${Math.max(1, mins)} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 48) return `${hours} h`;
+  const days = Math.floor(hours / 24);
+  return `${days} j`;
+}
+
+function relevanceLabel(score: number | null): string {
+  if (score == null) return "—";
+  return `${Math.round(score * 100)}%`;
+}
+
+interface RedditMessageWorkspaceProps {
+  title: string;
+  description: string;
+  items: MessageItem[];
+  isLoading: boolean;
+  isSyncing: boolean;
+  syncError?: string | null;
+  onSync: () => void;
+  onToggleSent: (id: string, isSent: boolean) => void;
+}
+
+export function RedditMessageWorkspace({
+  title,
+  description,
+  items,
+  isLoading,
+  isSyncing,
+  syncError,
+  onSync,
+  onToggleSent,
+}: RedditMessageWorkspaceProps) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (items.length && !selectedId) {
+      setSelectedId(items[0]!.id);
+    }
+  }, [items, selectedId]);
+
+  const selected = items.find((i) => i.id === selectedId) ?? items[0];
+
+  async function copyMessage(text: string) {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-white">{title}</h1>
+          <p className="mt-1 text-sm text-white/40">{description}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onSync}
+          disabled={isSyncing}
+          className="shrink-0 rounded-full border border-white/10 px-5 py-2.5 text-[13px] text-white/70 transition-colors hover:border-primary/30 hover:text-white disabled:opacity-50"
+        >
+          {isSyncing ? "Génération…" : "↻ Actualiser"}
+        </button>
+      </div>
+
+      {syncError && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-[13px] text-red-300/90">
+          {syncError}
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="flex min-h-[40vh] items-center justify-center text-white/40">
+          Chargement…
+        </div>
+      ) : items.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-white/10 py-20 text-center">
+          <p className="text-lg font-medium text-white/60">Aucun message pour l&apos;instant</p>
+          <p className="mt-2 text-sm text-white/35">
+            Cliquez sur Actualiser pour détecter des posts et générer des réponses.
+          </p>
+        </div>
+      ) : (
+        <div className="grid min-h-[calc(100vh-12rem)] gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+          <div className="space-y-3 overflow-y-auto pr-1 lg:max-h-[calc(100vh-12rem)]">
+            {items.map((item) => {
+              const active = selected?.id === item.id;
+              return (
+                <div
+                  key={item.id}
+                  className={cn(
+                    "rounded-2xl border transition-all",
+                    active
+                      ? "border-primary/30 bg-primary/[0.06]"
+                      : "border-white/[0.06] bg-white/[0.02] hover:border-white/10",
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(item.id)}
+                    className="w-full px-4 py-4 text-left"
+                  >
+                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/40">
+                      <span className="text-primary">r/{item.subreddit}</span>
+                      <span>·</span>
+                      <span>u/{item.author}</span>
+                      <span>·</span>
+                      <span>{timeAgo(item.redditCreatedAt ?? item.createdAt)}</span>
+                      <span>·</span>
+                      <span>Pertinence {relevanceLabel(item.relevanceScore)}</span>
+                    </div>
+                    <a
+                      href={item.permalink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="mt-2 block text-[14px] font-medium leading-snug text-white/90 hover:text-primary"
+                    >
+                      {item.title}
+                    </a>
+                  </button>
+                  <div className="border-t border-white/[0.04] px-4 py-3">
+                    <p className="text-[13px] leading-relaxed text-white/65">
+                      {item.generatedBody}
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      <label className="flex cursor-pointer items-center gap-2 text-[12px] text-white/50">
+                        <input
+                          type="checkbox"
+                          checked={item.isSent}
+                          onChange={(e) => onToggleSent(item.id, e.target.checked)}
+                          className="rounded border-white/20 bg-black/40"
+                        />
+                        Message envoyé
+                      </label>
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-[10px]",
+                          item.safetyScore >= 8
+                            ? "bg-emerald-500/15 text-emerald-300"
+                            : "bg-amber-500/15 text-amber-300",
+                        )}
+                      >
+                        Sécurité {item.safetyScore}/10
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {selected && (
+            <div className="sticky top-0 hidden rounded-2xl border border-white/[0.06] bg-[hsl(var(--surface-cold))] p-6 lg:block lg:max-h-[calc(100vh-12rem)] lg:overflow-y-auto">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/40">
+                <span className="text-primary">r/{selected.subreddit}</span>
+                <span>·</span>
+                <span>u/{selected.author}</span>
+                <span>·</span>
+                <span>{timeAgo(selected.redditCreatedAt ?? selected.createdAt)}</span>
+              </div>
+              <a
+                href={selected.permalink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 flex items-start gap-2 text-lg font-medium leading-snug text-white hover:text-primary"
+              >
+                {selected.title}
+                <ExternalLink className="mt-1 h-4 w-4 shrink-0 opacity-50" />
+              </a>
+              {selected.postBody && (
+                <p className="mt-4 line-clamp-6 text-[13px] leading-relaxed text-white/45">
+                  {selected.postBody}
+                </p>
+              )}
+              <div className="mt-6 rounded-xl border border-white/[0.06] bg-black/30 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[11px] uppercase tracking-wider text-white/35">
+                    Message prêt à copier
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => copyMessage(selected.generatedBody)}
+                    className="flex items-center gap-1.5 text-[12px] text-primary hover:text-primary/80"
+                  >
+                    {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copied ? "Copié" : "Copier"}
+                  </button>
+                </div>
+                <p className="mt-3 text-[14px] leading-relaxed text-white/80">
+                  {selected.generatedBody}
+                </p>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-4">
+                <label className="flex cursor-pointer items-center gap-2 text-[13px] text-white/60">
+                  <input
+                    type="checkbox"
+                    checked={selected.isSent}
+                    onChange={(e) => onToggleSent(selected.id, e.target.checked)}
+                    className="rounded border-white/20 bg-black/40"
+                  />
+                  Message envoyé
+                </label>
+                <span className="text-[12px] text-white/40">
+                  Pertinence {relevanceLabel(selected.relevanceScore)}
+                </span>
+                <span className="text-[12px] text-emerald-400/80">
+                  Sécurité {selected.safetyScore}/10
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
