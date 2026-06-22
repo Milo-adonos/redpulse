@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, gte, isNull } from "drizzle-orm";
+import { and, desc, eq, gte } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, teamProcedure } from "@/server/api/trpc";
 import { generatedMessages } from "@/server/db/schema";
@@ -41,7 +41,7 @@ export const messagesRouter = createTRPCRouter({
     .input(
       z.object({
         type: z.enum(["reply", "warmup"]),
-        unseenOnly: z.boolean().default(true),
+        pendingOnly: z.boolean().default(true),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -54,8 +54,8 @@ export const messagesRouter = createTRPCRouter({
         gte(generatedMessages.createdAt, getMaxPostAgeDate()),
       ];
 
-      if (input.unseenOnly) {
-        conditions.push(isNull(generatedMessages.viewedAt));
+      if (input.pendingOnly) {
+        conditions.push(eq(generatedMessages.isSent, false));
       }
 
       const rows = await ctx.db!.query.generatedMessages.findMany({
@@ -121,7 +121,6 @@ export const messagesRouter = createTRPCRouter({
           isSent: input.isSent,
           sentAt: input.isSent ? new Date() : null,
           sentByUserId: input.isSent ? ctx.session.user.id : null,
-          viewedAt: input.isSent ? new Date() : row.viewedAt,
         })
         .where(eq(generatedMessages.id, input.id));
 

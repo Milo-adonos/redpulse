@@ -46,7 +46,6 @@ interface RedditMessageWorkspaceProps {
   syncNotice?: string | null;
   onSync: () => void;
   onToggleSent: (id: string, isSent: boolean) => void;
-  onMarkViewed: (id: string) => void;
 }
 
 export function RedditMessageWorkspace({
@@ -59,7 +58,6 @@ export function RedditMessageWorkspace({
   syncNotice,
   onSync,
   onToggleSent,
-  onMarkViewed,
 }: RedditMessageWorkspaceProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -69,22 +67,21 @@ export function RedditMessageWorkspace({
       setSelectedId(null);
       return;
     }
-    if (!selectedId || !items.some((item) => item.id === selectedId)) {
-      setSelectedId(items[0]!.id);
+    if (selectedId && items.some((item) => item.id === selectedId)) {
+      return;
     }
+    setSelectedId(items[0]!.id);
   }, [items, selectedId]);
 
   const selected = items.find((i) => i.id === selectedId) ?? items[0];
 
-  async function copyMessage(text: string, id: string) {
+  async function copyMessage(text: string) {
     await navigator.clipboard.writeText(text);
     setCopied(true);
-    onMarkViewed(id);
     setTimeout(() => setCopied(false), 2000);
   }
 
-  function openRedditLink(url: string, id: string) {
-    onMarkViewed(id);
+  function openRedditLink(url: string) {
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
@@ -136,18 +133,23 @@ export function RedditMessageWorkspace({
               return (
                 <div
                   key={item.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedId(item.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedId(item.id);
+                    }
+                  }}
                   className={cn(
-                    "rounded-2xl border transition-all",
+                    "cursor-pointer rounded-2xl border text-left transition-all",
                     active
                       ? "border-primary/30 bg-primary/[0.06]"
                       : "border-white/[0.06] bg-white/[0.02] hover:border-white/10",
                   )}
                 >
-                  <button
-                    type="button"
-                    onClick={() => setSelectedId(item.id)}
-                    className="w-full px-4 py-4 text-left"
-                  >
+                  <div className="px-4 py-4">
                     <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/40">
                       <span className="text-primary">r/{item.subreddit}</span>
                       <span>·</span>
@@ -157,30 +159,26 @@ export function RedditMessageWorkspace({
                       <span>·</span>
                       <span>Pertinence {relevanceLabel(item.relevanceScore)}</span>
                     </div>
-                    <span
-                      role="link"
-                      tabIndex={0}
+                    <button
+                      type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        openRedditLink(item.permalink, item.id);
+                        openRedditLink(item.permalink);
                       }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          openRedditLink(item.permalink, item.id);
-                        }
-                      }}
-                      className="mt-2 block cursor-pointer text-[14px] font-medium leading-snug text-white/90 hover:text-primary"
+                      className="mt-2 flex w-full items-start gap-1.5 text-left text-[14px] font-medium leading-snug text-white/90 hover:text-primary"
                     >
-                      {item.title}
-                    </span>
-                  </button>
+                      <span className="min-w-0 flex-1">{item.title}</span>
+                      <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-40" />
+                    </button>
+                  </div>
                   <div className="border-t border-white/[0.04] px-4 py-3">
                     <p className="text-[13px] leading-relaxed text-white/65">
                       {item.generatedBody}
                     </p>
-                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <div
+                      className="mt-3 flex flex-wrap items-center gap-3"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <label className="flex cursor-pointer items-center gap-2 text-[12px] text-white/50">
                         <input
                           type="checkbox"
@@ -190,13 +188,6 @@ export function RedditMessageWorkspace({
                         />
                         Message envoyé
                       </label>
-                      <button
-                        type="button"
-                        onClick={() => onMarkViewed(item.id)}
-                        className="text-[12px] text-white/40 hover:text-white/70"
-                      >
-                        Marquer comme lu
-                      </button>
                       <span
                         className={cn(
                           "rounded-full px-2 py-0.5 text-[10px]",
@@ -225,7 +216,7 @@ export function RedditMessageWorkspace({
               </div>
               <button
                 type="button"
-                onClick={() => openRedditLink(selected.permalink, selected.id)}
+                onClick={() => openRedditLink(selected.permalink)}
                 className="mt-3 flex w-full items-start gap-2 text-left text-lg font-medium leading-snug text-white hover:text-primary"
               >
                 {selected.title}
@@ -243,7 +234,7 @@ export function RedditMessageWorkspace({
                   </p>
                   <button
                     type="button"
-                    onClick={() => copyMessage(selected.generatedBody, selected.id)}
+                    onClick={() => copyMessage(selected.generatedBody)}
                     className="flex items-center gap-1.5 text-[12px] text-primary hover:text-primary/80"
                   >
                     {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
@@ -264,13 +255,6 @@ export function RedditMessageWorkspace({
                   />
                   Message envoyé
                 </label>
-                <button
-                  type="button"
-                  onClick={() => onMarkViewed(selected.id)}
-                  className="text-[13px] text-white/45 hover:text-white/75"
-                >
-                  Marquer comme lu
-                </button>
                 <span className="text-[12px] text-white/40">
                   Pertinence {relevanceLabel(selected.relevanceScore)}
                 </span>
