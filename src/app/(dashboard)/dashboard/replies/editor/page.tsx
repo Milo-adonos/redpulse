@@ -2,11 +2,25 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { api } from "@/trpc/react";
 import { cn } from "@/lib/utils";
 
 export default function EditorPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[40vh] items-center justify-center text-white/40">
+          Chargement…
+        </div>
+      }
+    >
+      <EditorContent />
+    </Suspense>
+  );
+}
+
+function EditorContent() {
   const searchParams = useSearchParams();
   const postId = searchParams.get("post") ?? undefined;
   const commentId = searchParams.get("comment") ?? undefined;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { StatWidget } from "@/components/dashboard/stat-widget";
 import { PageHeader } from "@/components/dashboard/data-list";
@@ -8,6 +8,20 @@ import { api } from "@/trpc/react";
 import { ux } from "@/lib/ux-copy";
 
 export default function DashboardPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[40vh] items-center justify-center text-white/40">
+          Chargement de votre espace…
+        </div>
+      }
+    >
+      <DashboardContent />
+    </Suspense>
+  );
+}
+
+function DashboardContent() {
   const searchParams = useSearchParams();
   const inviteToken = searchParams.get("invite");
 

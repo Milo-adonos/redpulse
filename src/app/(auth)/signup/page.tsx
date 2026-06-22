@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useState, Suspense } from "react";
 import { signIn } from "next-auth/react";
 import {
   AuthShell,
@@ -17,6 +17,20 @@ import {
 import { api } from "@/trpc/react";
 
 export default function SignupPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center text-white/40">
+          Chargement…
+        </div>
+      }
+    >
+      <SignupForm />
+    </Suspense>
+  );
+}
+
+function SignupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [name, setName] = useState("");

@@ -4,6 +4,7 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   if (started) return;
   if (process.env.ENABLE_BACKGROUND_SCRAPER === "false") return;
+  if (process.env.VERCEL) return;
 
   started = true;
 
