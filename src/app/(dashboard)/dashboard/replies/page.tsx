@@ -9,7 +9,7 @@ export default function RepliesPage() {
   return (
     <RedditMessageWorkspace
       title="Reply"
-      description="Posts ICP dans vos subreddits — réponses utiles, dont certaines mentionnent votre produit naturellement."
+      description="Posts ICP + gens qui cherchent un outil/site — réponses avec mention naturelle du produit."
       {...workspace}
     />
   );

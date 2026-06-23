@@ -139,9 +139,11 @@ export const commentsRouter = createTRPCRouter({
         postTitle: input.postTitle,
         postBody: input.postBody,
         subreddit: input.subreddit,
-        productContext: project?.description ?? "Mon produit",
+        productContext: project?.description ?? project?.name ?? "Mon produit",
+        productName: project?.name ?? undefined,
+        siteUrl: project?.siteUrl ?? undefined,
         mentionProduct: input.mentionProduct,
-        tone: input.tone,
+        tone: "casual",
       });
 
       const settings = await getTeamSettings(ctx.db!, ctx.teamId);

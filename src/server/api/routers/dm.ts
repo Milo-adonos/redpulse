@@ -76,14 +76,16 @@ export const dmRouter = createTRPCRouter({
         postTitle: post.title,
         postBody: post.body ?? undefined,
         subreddit: post.subreddit,
-        productContext: project?.description ?? "our product",
+        productContext: project?.description ?? project?.name ?? "notre produit",
+        productName: project?.name ?? undefined,
+        siteUrl: project?.siteUrl ?? undefined,
         mentionProduct: true,
-        tone: "helpful",
+        tone: "casual",
       });
 
       const recipient = input.recipientUsername ?? post.author ?? "reddit_user";
       const subject = `Re: ${post.title.slice(0, 80)}`;
-      const dmBody = `Hey — saw your thread in r/${post.subreddit}. ${result.body}`;
+      const dmBody = `hey j'ai vu ton post sur r/${post.subreddit} — ${result.body}`;
 
       const [row] = await ctx.db!
         .insert(directMessages)

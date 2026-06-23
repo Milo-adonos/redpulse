@@ -2,8 +2,9 @@ import {
   generateRedditReply,
   generateWarmupReply,
 } from "@/server/ai/anthropic";
+import { isMessageTooArtificial } from "@/server/ai/reddit-voice";
 
-export type ResponseLanguage = "en";
+export type ResponseLanguage = "fr";
 
 export interface ReplyMessageInput {
   postTitle: string;
@@ -13,6 +14,7 @@ export interface ReplyMessageInput {
   productName?: string;
   siteUrl?: string;
   mentionSite: boolean;
+  seekingRecommendation?: boolean;
   language?: ResponseLanguage;
 }
 
@@ -26,6 +28,8 @@ function cleanHumanText(body: string): string {
     .replace(/^[-•*]\s+/gm, "")
     .replace(/\n[-•*]\s+/g, "\n")
     .replace(/\*\*/g, "")
+    .replace(/ — /g, ", ")
+    .replace(/ – /g, ", ")
     .trim();
 }
 
@@ -37,7 +41,7 @@ export async function generateReplyMessage(input: ReplyMessageInput) {
       .split("/")[0]
       ?.replace(/\.(app|com|io|co|net|org)$/i, "")
       .split(".")[0] ||
-    "the tool";
+    "le site";
 
   const result = await generateRedditReply({
     postTitle: input.postTitle,
@@ -47,11 +51,17 @@ export async function generateReplyMessage(input: ReplyMessageInput) {
     productName,
     siteUrl: input.siteUrl,
     mentionProduct: input.mentionSite,
+    seekingRecommendation: input.seekingRecommendation,
     tone: "casual",
   });
 
+  const body = cleanHumanText(result.body);
+  if (isMessageTooArtificial(body)) {
+    throw new Error("Message rejeté : ton trop artificiel");
+  }
+
   return {
-    body: cleanHumanText(result.body),
+    body,
     safetyScore: banRiskToSafetyScore(result.banRiskScore),
     model: result.model,
   };
@@ -69,8 +79,13 @@ export async function generateWarmupMessage(input: {
     subreddit: input.subreddit,
   });
 
+  const body = cleanHumanText(result.body);
+  if (isMessageTooArtificial(body)) {
+    throw new Error("Message rejeté : ton trop artificiel");
+  }
+
   return {
-    body: cleanHumanText(result.body),
+    body,
     safetyScore: banRiskToSafetyScore(result.banRiskScore),
     model: result.model,
   };

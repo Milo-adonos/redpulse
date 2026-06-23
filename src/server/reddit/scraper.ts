@@ -8,8 +8,11 @@ import {
 } from "@/server/db/schema";
 import {
   buildRedditPostUrl,
+  buildRecommendationSearchQueries,
   estimateIntentScore,
   fetchSubredditPosts,
+  fetchSubredditPostsByQuery,
+  isRelevantForReply,
   isRelevantToIcp,
   matchKeywords,
 } from "@/server/reddit/client";
@@ -144,66 +147,93 @@ export async function scrapeTeamDiscovery(db: Database, teamId: string) {
   let inserted = 0;
   let lastError: Error | null = null;
   let fetchedAny = false;
+  const seenIds = new Set<string>();
+
+  async function ingestPost(post: Awaited<ReturnType<typeof fetchSubredditPosts>>[number]) {
+    if (seenIds.has(post.id)) return;
+    seenIds.add(post.id);
+
+    const combined = `${post.title} ${post.selftext ?? ""}`;
+    if (
+      !isRelevantForReply(
+        post.title,
+        post.selftext ?? "",
+        keywords,
+        subreddits,
+        post.subreddit,
+      ) &&
+      !isRelevantToIcp(
+        post.title,
+        post.selftext ?? "",
+        keywords,
+        subreddits,
+        post.subreddit,
+      )
+    ) {
+      return;
+    }
+
+    const matched = matchKeywords(combined, keywords);
+    const intentScore = estimateIntentScore(
+      post.title,
+      post.selftext ?? "",
+      matched,
+    );
+
+    try {
+      await db
+        .insert(discoveredPosts)
+        .values({
+          teamId,
+          redditId: post.id,
+          subreddit: post.subreddit,
+          title: post.title,
+          body: post.selftext || null,
+          author: post.author,
+          score: post.score,
+          numComments: post.num_comments,
+          url: post.url,
+          permalink: buildRedditPostUrl(
+            post.subreddit,
+            post.id,
+            post.permalink,
+            post.url,
+          ),
+          matchedKeywords: matched,
+          intentScore: String(intentScore),
+          discoveredAt: redditDateFromUnix(post.created_utc),
+        })
+        .onConflictDoNothing();
+      inserted++;
+    } catch {
+      // duplicate or race
+    }
+  }
 
   for (const sub of subreddits) {
-    let posts;
+    let posts: Awaited<ReturnType<typeof fetchSubredditPosts>> = [];
     try {
-      posts = await fetchSubredditPosts(sub, 20, "new");
+      posts = await fetchSubredditPosts(sub, 20, "new", keywords);
       if (posts.length > 0) fetchedAny = true;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       console.error(`[scraper] r/${sub}:`, error);
-      continue;
+      posts = [];
     }
 
     for (const post of posts) {
-      const combined = `${post.title} ${post.selftext ?? ""}`;
-      if (
-        !isRelevantToIcp(
-          post.title,
-          post.selftext ?? "",
-          keywords,
-          subreddits,
-          post.subreddit,
-        )
-      ) {
-        continue;
-      }
+      await ingestPost(post);
+    }
 
-      const matched = matchKeywords(combined, keywords);
-      const intentScore = estimateIntentScore(
-        post.title,
-        post.selftext ?? "",
-        matched,
-      );
-
+    for (const query of buildRecommendationSearchQueries(keywords)) {
       try {
-        await db
-          .insert(discoveredPosts)
-          .values({
-            teamId,
-            redditId: post.id,
-            subreddit: post.subreddit,
-            title: post.title,
-            body: post.selftext || null,
-            author: post.author,
-            score: post.score,
-            numComments: post.num_comments,
-            url: post.url,
-            permalink: buildRedditPostUrl(
-              post.subreddit,
-              post.id,
-              post.permalink,
-              post.url,
-            ),
-            matchedKeywords: matched,
-            intentScore: String(intentScore),
-            discoveredAt: redditDateFromUnix(post.created_utc),
-          })
-          .onConflictDoNothing();
-        inserted++;
-      } catch {
-        // duplicate or race
+        const recPosts = await fetchSubredditPostsByQuery(sub, query, 8);
+        if (recPosts.length > 0) fetchedAny = true;
+        for (const post of recPosts) {
+          await ingestPost(post);
+        }
+      } catch (error) {
+        console.warn(`[scraper] r/${sub} search "${query}":`, error);
       }
     }
   }

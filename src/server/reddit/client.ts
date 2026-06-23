@@ -283,8 +283,9 @@ async function fetchViaArcticShift(
   subreddit: string,
   limit: number,
   sort: "new" | "hot",
-  keywords?: string[],
+  options?: { keywords?: string[]; query?: string },
 ): Promise<RedditListingPost[]> {
+  const keywords = options?.keywords;
   const clean = subreddit.replace(/^r\//i, "");
   const url = new URL(`${ARCTIC_SHIFT_BASE}/api/posts/search`);
   url.searchParams.set("subreddit", clean);
@@ -292,7 +293,9 @@ async function fetchViaArcticShift(
   url.searchParams.set("sort", "desc");
   url.searchParams.set("after", getMaxPostAgeIsoDate());
 
-  if (keywords?.length) {
+  if (options?.query) {
+    url.searchParams.set("query", options.query);
+  } else if (keywords?.length) {
     const query = keywords
       .slice(0, 4)
       .map((kw) => kw.split(/\s+/)[0])
@@ -344,6 +347,36 @@ async function fetchViaArcticShift(
   }
 
   return posts.slice(0, limit);
+}
+
+export function buildRecommendationSearchQueries(keywords: string[]): string[] {
+  const niche = keywords.slice(0, 3).join(" ").trim();
+  if (!niche) {
+    return ["app recommend", "tool looking for", "website anyone know"];
+  }
+  return [
+    `app recommend ${niche}`,
+    `tool for ${niche}`,
+    `website ${niche}`,
+    `anyone know app ${niche}`,
+    `looking for app ${niche}`,
+    `best tool ${niche}`,
+  ];
+}
+
+export async function fetchSubredditPostsByQuery(
+  subreddit: string,
+  query: string,
+  limit = 10,
+): Promise<RedditListingPost[]> {
+  try {
+    return filterRecentPosts(
+      await fetchViaArcticShift(subreddit, limit, "new", { query }),
+    ).slice(0, limit);
+  } catch (error) {
+    console.warn(`[reddit] search r/${subreddit} "${query}":`, error);
+    return [];
+  }
 }
 
 async function fetchPublicJson(
@@ -475,7 +508,7 @@ export async function fetchSubredditPosts(
 
   // 1. Arctic Shift — live posts, no OAuth (primary)
   try {
-    const livePosts = await fetchViaArcticShift(subreddit, limit, sort, keywords);
+    const livePosts = await fetchViaArcticShift(subreddit, limit, sort, { keywords });
     if (livePosts.length > 0) return livePosts;
   } catch (arcticError) {
     console.warn("[reddit] Arctic Shift:", arcticError);
@@ -545,11 +578,55 @@ export function estimateIntentScore(
 ): number {
   let score = Math.min(matched.length * 0.15, 0.45);
   const combined = `${title} ${body}`.toLowerCase();
+  if (detectRecommendationSeeking(title, body)) {
+    score += 0.5;
+  }
   if (/\$\d+|budget|pricing|looking for|recommend|best tool/.test(combined)) {
     score += 0.35;
   }
   if (/\?/.test(title)) score += 0.1;
   return Math.min(Number(score.toFixed(2)), 0.99);
+}
+
+const RECOMMENDATION_SEEKING_RE =
+  /(?:anyone|anybody|someone|somebody)\s+(?:know|use|recommend|heard of)|(?:looking for|need|want)\s+(?:a|an|some)?\s*(?:good\s+)?(?:app|tool|site|website|platform|software|service)|(?:recommend|suggestion)s?\s+(?:for|on)|what\s+(?:app|tool|site|website|software|platform)\s+(?:do you|you guys|would you|are you)|is there\s+(?:a|an)\s*(?:app|tool|site|website|platform)|best\s+(?:app|tool|site|website|platform)\s+for|know\s+(?:of\s+)?(?:a|any)\s*(?:good\s+)?(?:app|tool|site|website)|any\s+(?:app|tool|site|website)\s+(?:for|that)|which\s+(?:app|tool|site|website)/i;
+
+export function detectRecommendationSeeking(title: string, body: string): boolean {
+  return RECOMMENDATION_SEEKING_RE.test(`${title} ${body}`);
+}
+
+function matchesProblemSpace(
+  title: string,
+  body: string,
+  keywords: string[],
+): boolean {
+  const combined = `${title} ${body}`;
+  if (matchKeywords(combined, keywords).length > 0) return true;
+  const text = combined.toLowerCase();
+  const words = keywords
+    .flatMap((kw) => kw.toLowerCase().split(/[\s,/]+/))
+    .filter((word) => word.length > 3);
+  return words.some((word) => text.includes(word));
+}
+
+export function isRelevantForReply(
+  title: string,
+  body: string,
+  keywords: string[],
+  targetSubreddits: string[],
+  subreddit: string,
+): boolean {
+  if (!isInTargetSubreddit(subreddit, targetSubreddits)) return false;
+  if (isNailBeautyNiche(keywords) && isOffTopicForNailNiche(title, body)) {
+    return false;
+  }
+  if (isRelevantToIcp(title, body, keywords, targetSubreddits, subreddit)) {
+    return true;
+  }
+  return (
+    detectRecommendationSeeking(title, body) &&
+    matchesProblemSpace(title, body, keywords)
+  );
 }
 
 export function isInTargetSubreddit(

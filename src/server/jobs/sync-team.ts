@@ -14,12 +14,15 @@ import {
   generateWarmupMessage,
   type ResponseLanguage,
 } from "@/server/ai/message-generation";
+import { formatProductLabel, isMessageTooArtificial } from "@/server/ai/reddit-voice";
 import { generateRedditReply } from "@/server/ai/anthropic";
 import {
   buildRedditPostUrl,
   fetchSubredditPosts,
   isInTargetSubreddit,
+  isRelevantForReply,
   isRelevantToIcp,
+  detectRecommendationSeeking,
 } from "@/server/reddit/client";
 import {
   getMaxPostAgeDate,
@@ -31,36 +34,35 @@ const DEFAULT_MAX_REPLIES = Number(process.env.SCRAPE_MAX_REPLIES_PER_RUN ?? 8);
 const DEFAULT_MAX_WARMUP = Number(process.env.SCRAPE_MAX_WARMUP_PER_RUN ?? 5);
 const DEFAULT_MAX_DMS = Number(process.env.SCRAPE_MAX_DMS_PER_RUN ?? 3);
 
-function isLikelyFrench(text: string): boolean {
-  return /\b(j'ai|j'|c'est|les |des |pour |avec |truc|plutôt|ça |une |dans |qui |mais |être|français)\b/i.test(
-    text,
-  );
-}
-
 function isMessageRecent(_redditCreatedAt: Date | null, createdAt: Date): boolean {
   return createdAt >= getMaxPostAgeDate();
 }
 
-function fallbackWarmupBody(subreddit: string, title: string): string {
+function fallbackWarmupBody(_subreddit: string, title: string): string {
   const t = title.toLowerCase();
-  if (/nail|manicure|polish|gel/.test(t)) {
-    return "these look really clean, love the shape on these";
+  if (/nail|manicure|polish|gel|chrome|art/.test(t)) {
+    return "nan mais grave stylé j'adore la forme 💅";
   }
-  if (/\?|help|advice|recommend/.test(t)) {
-    return "following this thread, curious what others ended up going with";
+  if (/\?|help|advice|recommend|conseil/.test(t)) {
+    return "jsp trop curieuse de voir ce que les autres ont choisi au final tbh";
   }
-  return `solid post — always good to see real talk in r/${subreddit.replace(/^r\//i, "")}`;
+  return "c'est trop bien ça donne grave envie 😭";
 }
 
-function fallbackReplyBody(productName: string, mentionSite: boolean): string {
+function fallbackReplyBody(
+  productName: string,
+  siteUrl: string | null | undefined,
+  mentionSite: boolean,
+): string {
+  const label = formatProductLabel(productName, siteUrl);
   if (mentionSite) {
-    return `we had something similar at our salon — ended up using ${productName} to preview designs on clients before committing, saved a lot of back and forth`;
+    return `omg j'ai eu le même souci 😭 j'ai testé ${label} ya genre 2 semaines et fr ça m'a grave aidée pour visualiser avant, t'as déjà essayé un truc du genre ?`;
   }
-  return "yeah previewing the design first helps a ton, especially when clients aren't sure what they want";
+  return "bah moi j'essaye toujours de visualiser le design avant de me lancer fr, ça évite trop de galères tu fais comment toi ?";
 }
 
 async function getLanguage(): Promise<ResponseLanguage> {
-  return "en";
+  return "fr";
 }
 
 async function getTeamOwnerId(db: Database, teamId: string): Promise<string | null> {
@@ -113,16 +115,23 @@ export async function syncTeamReplies(
   ]);
 
   const { keywords, subreddits } = targeting;
-  const relevantDiscovered = discovered.filter((post) =>
-    isInTargetSubreddit(post.subreddit, subreddits) &&
-    isRelevantToIcp(
-      post.title,
-      post.body ?? "",
-      keywords,
-      subreddits,
-      post.subreddit,
-    ),
-  );
+  const relevantDiscovered = discovered
+    .filter((post) =>
+      isInTargetSubreddit(post.subreddit, subreddits) &&
+      isRelevantForReply(
+        post.title,
+        post.body ?? "",
+        keywords,
+        subreddits,
+        post.subreddit,
+      ),
+    )
+    .sort((a, b) => {
+      const aSeek = detectRecommendationSeeking(a.title, a.body ?? "") ? 1 : 0;
+      const bSeek = detectRecommendationSeeking(b.title, b.body ?? "") ? 1 : 0;
+      if (bSeek !== aSeek) return bSeek - aSeek;
+      return Number(b.intentScore) - Number(a.intentScore);
+    });
 
   const existingIds = new Set(existing.map((m) => m.redditId));
   const actorId = options?.userId ?? (await getTeamOwnerId(db, teamId));
@@ -132,7 +141,7 @@ export async function syncTeamReplies(
     if (msg.isSent) continue;
     if (
       !isInTargetSubreddit(msg.subreddit, subreddits) ||
-      !isRelevantToIcp(
+      !isRelevantForReply(
         msg.title,
         msg.postBody ?? "",
         keywords,
@@ -140,7 +149,7 @@ export async function syncTeamReplies(
         msg.subreddit,
       ) ||
       !isMessageRecent(msg.redditCreatedAt, msg.createdAt) ||
-      isLikelyFrench(msg.generatedBody)
+      isMessageTooArtificial(msg.generatedBody)
     ) {
       await db.delete(generatedMessages).where(eq(generatedMessages.id, msg.id));
       existingIds.delete(msg.redditId);
@@ -151,7 +160,11 @@ export async function syncTeamReplies(
     if (created >= maxNew) break;
     if (existingIds.has(post.redditId)) continue;
 
-    const mentionSite = created % 3 !== 2;
+    const seekingRecommendation = detectRecommendationSeeking(
+      post.title,
+      post.body ?? "",
+    );
+    const mentionSite = seekingRecommendation || created % 3 !== 2;
     let generatedBody: string;
     let safetyScore = 9;
 
@@ -164,6 +177,7 @@ export async function syncTeamReplies(
         productName: project?.name ?? undefined,
         siteUrl: project?.siteUrl ?? undefined,
         mentionSite,
+        seekingRecommendation,
         language,
       });
       generatedBody = generated.body;
@@ -171,7 +185,8 @@ export async function syncTeamReplies(
     } catch (error) {
       console.error(`[sync-team] reply AI ${post.redditId}:`, error);
       generatedBody = fallbackReplyBody(
-        project?.name ?? "our tool",
+        project?.name ?? "le site",
+        project?.siteUrl,
         mentionSite,
       );
     }
@@ -381,13 +396,15 @@ export async function syncTeamDms(
           subreddit: post.subreddit,
           productContext: project?.description ?? project?.name ?? "",
           productName: project?.name ?? undefined,
+          siteUrl: project?.siteUrl ?? undefined,
           mentionProduct: true,
+          seekingRecommendation: true,
           tone: "casual",
         });
-        body = `Hey — saw your post in r/${post.subreddit}. ${result.body}`;
+        body = `hey j'ai vu ton post sur r/${post.subreddit} — ${result.body}`;
       } catch (error) {
         console.error(`[sync-team] dm AI ${post.redditId}:`, error);
-        body = `Hey — saw your post in r/${post.subreddit}. ${fallbackReplyBody(project?.name ?? "MakeMyNails", true)}`;
+        body = `hey j'ai vu ton post sur r/${post.subreddit} — ${fallbackReplyBody(project?.name ?? "le site", project?.siteUrl, true)}`;
       }
 
       const recipient = post.author.replace(/^u\//i, "");

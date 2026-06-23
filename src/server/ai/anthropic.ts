@@ -1,3 +1,12 @@
+import {
+  buildPersonaRules,
+  buildReplyMentionRules,
+  buildWarmupRules,
+  computeAuthenticityBanRisk,
+  formatProductLabel,
+  isMessageTooArtificial,
+} from "@/server/ai/reddit-voice";
+
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const MODEL_CANDIDATES = [
   process.env.ANTHROPIC_MODEL,
@@ -15,6 +24,7 @@ export interface GenerateReplyInput {
   productName?: string;
   siteUrl?: string;
   mentionProduct?: boolean;
+  seekingRecommendation?: boolean;
   tone?: ReplyTone;
 }
 
@@ -24,75 +34,18 @@ export interface GenerateReplyResult {
   model: string;
 }
 
-function computeBanRiskScore(text: string, mentionProduct: boolean): number {
-  let score = 0.1;
-  const urlCount = (text.match(/https?:\/\//g) ?? []).length;
-  if (urlCount > 1) score += 0.3;
-  if (urlCount === 1) score += 0.1;
+const MAX_GENERATION_ATTEMPTS = 3;
 
-  const promoWords = [
-    "buy now",
-    "discount",
-    "limited offer",
-    "check out our",
-    "best tool ever",
-    "hope this helps",
-    "game changer",
-  ];
-  const lower = text.toLowerCase();
-  for (const word of promoWords) {
-    if (lower.includes(word)) score += 0.15;
-  }
-
-  if (mentionProduct && text.length < 80) score += 0.1;
-  if (text.length > 400) score += 0.05;
-
-  return Math.min(1, Math.round(score * 100) / 100);
-}
-
-export async function generateRedditReply(
-  input: GenerateReplyInput,
-): Promise<GenerateReplyResult> {
+async function callClaude(
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number,
+  temperature: number,
+): Promise<{ body: string; model: string }> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY non configurée");
   }
-
-  const tone = input.tone ?? "casual";
-  const mentionProduct = input.mentionProduct ?? true;
-  const productName = input.productName ?? "the product";
-  const siteHint = input.siteUrl
-    ? input.siteUrl.replace(/^https?:\/\/(www\.)?/, "").split("/")[0]
-    : null;
-
-  const mentionRule = mentionProduct
-    ? `Softly connect the post to what ${productName} solves — like someone who actually uses it, NOT a founder pitching.
-- Mention ${productName}${siteHint ? ` (${siteHint})` : ""} at most once, only if it fits naturally.
-- Bridge from their situation to your experience: "we had the same thing / ended up using X for Y".
-- Never drop a bare URL, never say "check out", "game changer", or "hope this helps".
-- If the post is only loosely related, still add value first, then one casual mention of how you handle it.`
-    : `Do NOT mention any product, brand, app name, or URL.
-- Still be helpful in the niche: share a practical tip or relatable experience.
-- This builds credibility before ever naming a tool.`;
-
-  const systemPrompt = `You write Reddit comments for the REPLY workflow — finding ICP posts and joining the conversation like a real r/${input.subreddit} member who might eventually share what they use.
-
-Rules:
-- English only. ${tone} tone.
-- 1-3 short sentences. Max 280 chars preferred.
-- Match r/${input.subreddit} voice: casual, direct, contractions ok, sometimes lowercase.
-- NO AI voice: no "great question", "I'd recommend checking out", bullet points, or em dashes.
-- NO corporate/marketing speak.
-${mentionRule}
-- Output ONLY the comment text.`;
-
-  const userPrompt = `Subreddit: r/${input.subreddit}
-Post: ${input.postTitle}
-${input.postBody ? `Body: ${input.postBody.slice(0, 400)}` : ""}
-
-What ${productName} does (for context only): ${input.productContext.slice(0, 300)}
-
-Write one reply comment. ${mentionProduct ? "Include a natural, subtle mention of the product." : "Helpful only — no product mention."}`;
 
   let lastError = "";
   let data: { content: Array<{ type: string; text?: string }> } | null = null;
@@ -108,8 +61,8 @@ Write one reply comment. ${mentionProduct ? "Include a natural, subtle mention o
       },
       body: JSON.stringify({
         model,
-        max_tokens: 200,
-        temperature: 0.9,
+        max_tokens: maxTokens,
+        temperature,
         system: systemPrompt,
         messages: [{ role: "user", content: userPrompt }],
       }),
@@ -138,11 +91,57 @@ Write one reply comment. ${mentionProduct ? "Include a natural, subtle mention o
     throw new Error("Réponse vide de Claude");
   }
 
-  return {
-    body,
-    banRiskScore: computeBanRiskScore(body, mentionProduct),
-    model: usedModel,
-  };
+  return { body, model: usedModel };
+}
+
+export async function generateRedditReply(
+  input: GenerateReplyInput,
+): Promise<GenerateReplyResult> {
+  const mentionProduct = input.mentionProduct ?? true;
+  const seekingRecommendation = input.seekingRecommendation ?? false;
+  const productLabel = formatProductLabel(input.productName, input.siteUrl);
+
+  const systemPrompt = `${buildPersonaRules(input.subreddit)}
+
+${buildReplyMentionRules(productLabel, { mentionProduct, seekingRecommendation })}
+
+BONS EXEMPLES :
+"omg j'ai eu exactement le même problème 😭 j'ai fini par tester des trucs au hasard et finalement le gel top coat ça change tout fr, t'as essayé ?"
+"jsp si c'est pour tous les niveaux mais j'ai trouvé un site qui génère des designs ya quelques semaines et c'est trop bien pour s'inspirer 💅"`;
+
+  const userPrompt = `Subreddit: r/${input.subreddit}
+Post: ${input.postTitle}
+${input.postBody ? `Contenu: ${input.postBody.slice(0, 400)}` : ""}
+
+Contexte produit (ne pas recopier mot pour mot): ${input.productContext.slice(0, 300)}
+
+Écris UN commentaire prêt à poster. ${
+    seekingRecommendation
+      ? "La personne cherche un outil/site — mentionne le produit naturellement."
+      : mentionProduct
+        ? "Tu peux mentionner le produit si ça sonne vrai."
+        : "Aucune mention produit."
+  }`;
+
+  let lastResult: GenerateReplyResult | null = null;
+
+  for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
+    const temperature = 0.92 + attempt * 0.04;
+    const { body, model } = await callClaude(systemPrompt, userPrompt, 180, temperature);
+    const banRiskScore = computeAuthenticityBanRisk(body, mentionProduct);
+
+    lastResult = { body, banRiskScore, model };
+
+    if (!isMessageTooArtificial(body) && banRiskScore <= 0.25) {
+      return lastResult;
+    }
+  }
+
+  if (!lastResult || isMessageTooArtificial(lastResult.body)) {
+    throw new Error("Message généré trop artificiel — réessayez");
+  }
+
+  return lastResult;
 }
 
 export async function generateWarmupReply(input: {
@@ -150,74 +149,40 @@ export async function generateWarmupReply(input: {
   subreddit: string;
   postBody?: string;
 }): Promise<GenerateReplyResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY non configurée");
-  }
+  const systemPrompt = `${buildPersonaRules(input.subreddit)}
 
-  const systemPrompt = `You write Reddit comments for the WARMUP workflow — building karma and presence in r/${input.subreddit} WITHOUT promoting anything.
+${buildWarmupRules()}
 
-Rules:
-- English only. Casual tone.
-- 1-2 short sentences. Max 200 chars.
-- React like a normal community member: agree, ask a follow-up, share a tiny personal take, compliment their work.
-- NO product mentions, NO brand names, NO URLs, NO advice that sounds like you're selling something.
-- NO AI voice: no "hope this helps", "great question", bullet points, or em dashes.
-- Output ONLY the comment text.`;
+BONS EXEMPLES :
+"nan mais grave stylé j'adore la forme 💅"
+"omg trop beau 😭 c'est quoi la couleur ?"`;
 
   const userPrompt = `Subreddit: r/${input.subreddit}
 Post: ${input.postTitle}
-${input.postBody ? `Body: ${input.postBody.slice(0, 300)}` : ""}
+${input.postBody ? `Contenu: ${input.postBody.slice(0, 300)}` : ""}
 
-Write a short, genuine warmup comment. Zero promotion.`;
+Écris UN commentaire warmup court. Zéro promo.`;
 
-  let lastError = "";
-  let data: { content: Array<{ type: string; text?: string }> } | null = null;
-  let usedModel = MODEL_CANDIDATES[0] ?? "claude-haiku-4-5-20251001";
+  let lastResult: GenerateReplyResult | null = null;
 
-  for (const model of MODEL_CANDIDATES.length ? MODEL_CANDIDATES : ["claude-haiku-4-5-20251001"]) {
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 150,
-        temperature: 0.95,
-        system: systemPrompt,
-        messages: [{ role: "user", content: userPrompt }],
-      }),
-    });
+  for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
+    const temperature = 0.94 + attempt * 0.03;
+    const { body, model } = await callClaude(systemPrompt, userPrompt, 140, temperature);
+    const banRiskScore = computeAuthenticityBanRisk(body, false);
 
-    if (response.ok) {
-      data = await response.json();
-      usedModel = model;
-      break;
-    }
+    lastResult = { body, banRiskScore, model };
 
-    lastError = await response.text();
-    if (response.status !== 404) {
-      throw new Error(`Anthropic API error (${response.status}): ${lastError}`);
+    if (!isMessageTooArtificial(body) && banRiskScore <= 0.2) {
+      return lastResult;
     }
   }
 
-  if (!data) {
-    throw new Error(`Anthropic API error: aucun modèle disponible. ${lastError}`);
+  if (!lastResult || isMessageTooArtificial(lastResult.body)) {
+    throw new Error("Message warmup trop artificiel — réessayez");
   }
 
-  const body =
-    data.content.find((block) => block.type === "text")?.text?.trim() ?? "";
-
-  if (!body) {
-    throw new Error("Réponse vide de Claude");
-  }
-
-  return {
-    body,
-    banRiskScore: computeBanRiskScore(body, false),
-    model: usedModel,
-  };
+  return lastResult;
 }
+
+// Re-export for routers that validate generated text
+export { computeAuthenticityBanRisk, isMessageTooArtificial } from "@/server/ai/reddit-voice";
