@@ -41,12 +41,12 @@ function isMessageRecent(_redditCreatedAt: Date | null, createdAt: Date): boolea
 function fallbackWarmupBody(_subreddit: string, title: string): string {
   const t = title.toLowerCase();
   if (/nail|manicure|polish|gel|chrome|art/.test(t)) {
-    return "nan mais grave stylé j'adore la forme 💅";
+    return "no bc this shape is literally perfect 💅";
   }
-  if (/\?|help|advice|recommend|conseil/.test(t)) {
-    return "jsp trop curieuse de voir ce que les autres ont choisi au final tbh";
+  if (/\?|help|advice|recommend/.test(t)) {
+    return "following this thread tbh curious what everyone ended up going with";
   }
-  return "c'est trop bien ça donne grave envie 😭";
+  return "ok this is so good 😭";
 }
 
 function fallbackReplyBody(
@@ -56,13 +56,13 @@ function fallbackReplyBody(
 ): string {
   const label = formatProductLabel(productName, siteUrl);
   if (mentionSite) {
-    return `omg j'ai eu le même souci 😭 j'ai testé ${label} ya genre 2 semaines et fr ça m'a grave aidée pour visualiser avant, t'as déjà essayé un truc du genre ?`;
+    return `omg same issue 😭 i tried ${label} like 2 weeks ago and fr it helped so much for previewing before committing, have u tried anything like that?`;
   }
-  return "bah moi j'essaye toujours de visualiser le design avant de me lancer fr, ça évite trop de galères tu fais comment toi ?";
+  return "yeah i always try to preview the design first fr saves so much back and forth, what do u usually do?";
 }
 
 async function getLanguage(): Promise<ResponseLanguage> {
-  return "fr";
+  return "en";
 }
 
 async function getTeamOwnerId(db: Database, teamId: string): Promise<string | null> {
@@ -185,7 +185,7 @@ export async function syncTeamReplies(
     } catch (error) {
       console.error(`[sync-team] reply AI ${post.redditId}:`, error);
       generatedBody = fallbackReplyBody(
-        project?.name ?? "le site",
+        project?.name ?? "this site",
         project?.siteUrl,
         mentionSite,
       );
@@ -401,10 +401,10 @@ export async function syncTeamDms(
           seekingRecommendation: true,
           tone: "casual",
         });
-        body = `hey j'ai vu ton post sur r/${post.subreddit} — ${result.body}`;
+        body = `hey saw ur post in r/${post.subreddit} — ${result.body}`;
       } catch (error) {
         console.error(`[sync-team] dm AI ${post.redditId}:`, error);
-        body = `hey j'ai vu ton post sur r/${post.subreddit} — ${fallbackReplyBody(project?.name ?? "le site", project?.siteUrl, true)}`;
+        body = `hey saw ur post in r/${post.subreddit} — ${fallbackReplyBody(project?.name ?? "this site", project?.siteUrl, true)}`;
       }
 
       const recipient = post.author.replace(/^u\//i, "");

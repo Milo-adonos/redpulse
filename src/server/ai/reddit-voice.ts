@@ -13,31 +13,33 @@ export function formatProductLabel(
   const site = formatSiteHint(siteUrl);
   if (site) return site;
   if (productName?.trim()) return productName.trim().toLowerCase();
-  return "le site";
+  return "this site";
 }
 
 const FORBIDDEN_PATTERNS = [
-  /^bonjour\b/i,
-  /\bcordialement\b/i,
-  /\bn'hésitez\b/i,
-  /\bn'hésite pas à consulter\b/i,
-  /\bje vous recommande\b/i,
-  /\bje vous conseille\b/i,
-  /\bnous vous\b/i,
-  /\bveuillez\b/i,
-  /\bvotre situation\b/i,
-  /\bformidable\b/i,
-  /\boutil formidable\b/i,
-  /\bj'ai découvert un outil\b/i,
-  /\btutoriel(s)? en ligne\b/i,
-  /\bj'espère que cela\b/i,
-  /\bexcellente question\b/i,
-  /\bje comprends tout à fait\b/i,
+  /^hello\b/i,
+  /^hi there\b/i,
+  /\bdear\b/i,
+  /\bkind regards\b/i,
+  /\bbest regards\b/i,
   /\bhope this helps\b/i,
   /\bgreat question\b/i,
-  /\bi'd recommend\b/i,
-  /\bcheck out\b/i,
+  /\bi'd recommend checking out\b/i,
+  /\bi would recommend\b/i,
+  /\bplease feel free\b/i,
+  /\bdon't hesitate to\b/i,
+  /\bi understand your situation\b/i,
+  /\bexcellent question\b/i,
+  /\bcheck out our\b/i,
   /\bgame changer\b/i,
+  /\brevolutionary tool\b/i,
+  /\bamazing tool\b/i,
+  /\bformidable\b/i,
+  /\bj'ai\b/i,
+  /\bc'est\b/i,
+  /\bt'as\b/i,
+  /\bn'hésitez\b/i,
+  /\bcordialement\b/i,
   /^-\s/m,
   /^\d+\.\s/m,
   /\n-\s/,
@@ -56,10 +58,6 @@ export function isMessageTooArtificial(text: string): boolean {
   const sentences = trimmed.split(/[.!?]+/).filter(Boolean);
   if (sentences.length > 4) return true;
 
-  const formalVous = /\b(vous|vos)\b/i.test(trimmed);
-  const tutoiement = /\b(tu|ton|ta|tes|t'|toi)\b/i.test(trimmed);
-  if (formalVous && !tutoiement) return true;
-
   return false;
 }
 
@@ -77,13 +75,13 @@ export function computeAuthenticityBanRisk(
   if (urlCount === 1) score += 0.08;
 
   const promoWords = [
-    "promo",
-    "offre limitée",
-    "incontournable",
-    "révolutionnaire",
-    "incroyable outil",
+    "buy now",
+    "limited offer",
     "must have",
-    "lien en bio",
+    "link in bio",
+    "discount",
+    "check out",
+    "highly recommend",
   ];
   for (const word of promoWords) {
     if (lower.includes(word)) score += 0.12;
@@ -96,31 +94,30 @@ export function computeAuthenticityBanRisk(
 }
 
 export function buildPersonaRules(subreddit: string): string {
-  return `Tu écris UNIQUEMENT le texte du commentaire Reddit — rien d'autre.
+  return `You write ONLY the Reddit comment text — nothing else.
 
-PROFIL :
-- Fille 18-25 ans, passionnée nail art / beauté
-- Écrit depuis son tel, vite, naturellement
-- Membre de r/${subreddit} depuis un moment
-- Ton TikTok/Instagram, PAS assistant IA
+PERSONA:
+- Girl, 18-25, obsessed with nail art / beauty
+- Typing from her phone, fast and natural
+- Been in r/${subreddit} for a while
+- TikTok/Instagram voice, NOT an AI assistant
 
-RÈGLES STRICTES :
-- Tutoiement uniquement, JAMAIS vouvoiement
-- Pas de majuscule en début de phrase (ou rare)
-- Ponctuation imparfaite ok
-- Abréviations naturelles : jsp, mdr, ptdr, omg, ngl, tbh, fr, bah, ouais, nan, trop, grave, stylé
-- Fautes légères ok : "trop bien", "ça donne", "j'adore", "c'est trop ça"
-- PAS de tirets, PAS de listes, PAS de structure IA
-- PAS de "bonjour", "cordialement", "n'hésitez pas", "je vous", "veuillez"
-- 2-3 phrases max, courtes
-- 1-2 emojis max : 💅🔥😭✨
-- Parfois une question à la fin
-- Français uniquement
+STRICT RULES:
+- English only
+- Casual, lowercase vibe (caps ok for emphasis sometimes)
+- Imperfect punctuation is fine
+- Natural slang: omg, ngl, tbh, fr, lowkey, literally, honestly, kinda, idk, lol, lmao, slay, obsessed, so good, deadass
+- Light typos ok: "its", "ur", "u", "rn", "bc", "w/", "gonna", "wanna"
+- NO dashes, NO bullet lists, NO AI structure
+- NO "hello", "hope this helps", "great question", "I'd recommend checking out", "please feel free"
+- 2-3 short sentences max
+- 1-2 emojis max: 💅🔥😭✨
+- Sometimes end with a question to engage
 
-INTERDIT :
-"Bonjour ! Je comprends tout à fait votre situation..."
-"N'hésitez pas à consulter des tutoriels..."
-"Je vous recommande vivement..."
+FORBIDDEN:
+"Hello! I completely understand your situation..."
+"Please feel free to check out online tutorials..."
+"I highly recommend that you..."
 "- Point 1 / - Point 2"`;
 }
 
@@ -132,23 +129,23 @@ export function buildReplyMentionRules(
   },
 ): string {
   if (options.seekingRecommendation) {
-    return `La personne CHERCHE un site/app/outil. Réponds comme quelqu'un qui a trouvé un truc qui marche.
-- Mentionne ${productLabel} ultra naturellement, ex: "j'ai testé ${productLabel} y'a genre 2 semaines et honnêtement c'est ouf"
-- PAS "j'ai découvert un outil formidable", PAS de pitch`;
+    return `They're actively looking for an app/site/tool. Reply like someone who found something that actually works.
+- Mention ${productLabel} super naturally, e.g. "i tried ${productLabel} like 2 weeks ago and honestly its been so good for previewing designs"
+- NOT "I discovered an amazing tool", NO sales pitch`;
   }
 
   if (options.mentionProduct) {
-    return `Tu peux glisser ${productLabel} naturellement si ça colle au post.
-- Ex: "jsp j'ai trouvé ${productLabel} ya quelques semaines c'est trop bien pour s'inspirer 💅"
-- Une seule mention max, zero pub`;
+    return `You can slip in ${productLabel} naturally if it fits the post.
+- e.g. "ngl i found ${productLabel} a few weeks ago and its lowkey perfect for getting inspo 💅"
+- One mention max, zero ad vibes`;
   }
 
-  return `ZÉRO produit, ZÉRO marque, ZÉRO URL. Juste un conseil ou une expérience perso dans la niche.`;
+  return `ZERO product, ZERO brand names, ZERO URLs. Just a helpful tip or personal experience in the niche.`;
 }
 
 export function buildWarmupRules(): string {
-  return `WARMUP — zéro promo, zéro produit, zéro marque, zéro URL.
-- Réagis comme une vraie fille de la commu : compliment, avis perso, question relou mais sympa
-- Ex: "omg le chrome il est trop beau 😭 tu l'as fait comment ?"
-- Ex: "nan mais grave stylé, j'adore la forme"`;
+  return `WARMUP — zero promo, zero product, zero brand, zero URL.
+- React like a real community girl: compliment, hot take, casual question
+- e.g. "omg the chrome is so clean 😭 how did u get it like that?"
+- e.g. "no bc this shape is literally perfect 💅"`;
 }

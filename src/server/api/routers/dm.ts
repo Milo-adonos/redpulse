@@ -85,7 +85,7 @@ export const dmRouter = createTRPCRouter({
 
       const recipient = input.recipientUsername ?? post.author ?? "reddit_user";
       const subject = `Re: ${post.title.slice(0, 80)}`;
-      const dmBody = `hey j'ai vu ton post sur r/${post.subreddit} — ${result.body}`;
+      const dmBody = `hey saw ur post in r/${post.subreddit} — ${result.body}`;
 
       const [row] = await ctx.db!
         .insert(directMessages)

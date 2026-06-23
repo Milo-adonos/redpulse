@@ -105,22 +105,22 @@ export async function generateRedditReply(
 
 ${buildReplyMentionRules(productLabel, { mentionProduct, seekingRecommendation })}
 
-BONS EXEMPLES :
-"omg j'ai eu exactement le même problème 😭 j'ai fini par tester des trucs au hasard et finalement le gel top coat ça change tout fr, t'as essayé ?"
-"jsp si c'est pour tous les niveaux mais j'ai trouvé un site qui génère des designs ya quelques semaines et c'est trop bien pour s'inspirer 💅"`;
+GOOD EXAMPLES :
+"omg i had the exact same issue 😭 ended up trying random stuff and honestly a good gel top coat changed everything fr, have u tried that?"
+"ngl i found a site that generates nail designs like a few weeks ago and its lowkey perfect for inspo 💅"`;
 
   const userPrompt = `Subreddit: r/${input.subreddit}
 Post: ${input.postTitle}
-${input.postBody ? `Contenu: ${input.postBody.slice(0, 400)}` : ""}
+${input.postBody ? `Body: ${input.postBody.slice(0, 400)}` : ""}
 
-Contexte produit (ne pas recopier mot pour mot): ${input.productContext.slice(0, 300)}
+Product context (don't copy verbatim): ${input.productContext.slice(0, 300)}
 
-Écris UN commentaire prêt à poster. ${
+Write ONE comment ready to post. ${
     seekingRecommendation
-      ? "La personne cherche un outil/site — mentionne le produit naturellement."
+      ? "They're looking for a tool/site — mention the product naturally."
       : mentionProduct
-        ? "Tu peux mentionner le produit si ça sonne vrai."
-        : "Aucune mention produit."
+        ? "You can mention the product if it sounds real."
+        : "No product mention."
   }`;
 
   let lastResult: GenerateReplyResult | null = null;
@@ -153,15 +153,15 @@ export async function generateWarmupReply(input: {
 
 ${buildWarmupRules()}
 
-BONS EXEMPLES :
-"nan mais grave stylé j'adore la forme 💅"
-"omg trop beau 😭 c'est quoi la couleur ?"`;
+GOOD EXAMPLES :
+"no bc this shape is literally perfect 💅"
+"omg so pretty 😭 what color is that?"`;
 
   const userPrompt = `Subreddit: r/${input.subreddit}
 Post: ${input.postTitle}
-${input.postBody ? `Contenu: ${input.postBody.slice(0, 300)}` : ""}
+${input.postBody ? `Body: ${input.postBody.slice(0, 300)}` : ""}
 
-Écris UN commentaire warmup court. Zéro promo.`;
+Write ONE short warmup comment. Zero promo.`;
 
   let lastResult: GenerateReplyResult | null = null;
 

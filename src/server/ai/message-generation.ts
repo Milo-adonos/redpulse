@@ -4,7 +4,7 @@ import {
 } from "@/server/ai/anthropic";
 import { isMessageTooArtificial } from "@/server/ai/reddit-voice";
 
-export type ResponseLanguage = "fr";
+export type ResponseLanguage = "en";
 
 export interface ReplyMessageInput {
   postTitle: string;
@@ -41,7 +41,7 @@ export async function generateReplyMessage(input: ReplyMessageInput) {
       .split("/")[0]
       ?.replace(/\.(app|com|io|co|net|org)$/i, "")
       .split(".")[0] ||
-    "le site";
+    "this site";
 
   const result = await generateRedditReply({
     postTitle: input.postTitle,
