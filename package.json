@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "dev:turbo": "next dev --turbopack",
+    "dev": "lsof -ti:3000,3001 2>/dev/null | xargs kill -9 2>/dev/null; next dev",
+    "dev:turbo": "lsof -ti:3000,3001 2>/dev/null | xargs kill -9 2>/dev/null; next dev --turbopack",
     "dev:clean": "lsof -ti:3000,3001 2>/dev/null | xargs kill -9 2>/dev/null; rm -rf .next && next dev",
     "build": "next build",
     "start": "next start",
@@ -12,7 +12,8 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:migrate": "node scripts/run-migrations.mjs",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "screenshots": "node scripts/capture-screenshots.mjs"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.7.4",
@@ -55,6 +56,7 @@
     "drizzle-kit": "^0.30.1",
     "eslint": "^9.17.0",
     "eslint-config-next": "^15.1.3",
+    "playwright": "^1.61.1",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2"

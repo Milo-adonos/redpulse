@@ -76,6 +76,12 @@ interface SectionWorkspaceProps {
   limitModalOpen?: boolean;
   setLimitModalOpen?: (open: boolean) => void;
   messagesLimit?: number;
+  demoMode?: {
+    postingUsername: string;
+    postingKarma: number;
+    sidePanel: React.ReactNode;
+    initialSelectedRedditId: string;
+  };
 }
 
 export function SectionWorkspace({
@@ -98,13 +104,17 @@ export function SectionWorkspace({
   limitModalOpen,
   setLimitModalOpen,
   messagesLimit = 200,
+  demoMode,
 }: SectionWorkspaceProps) {
-  const [selectedRedditId, setSelectedRedditId] = useState<string | null>(null);
+  const [selectedRedditId, setSelectedRedditId] = useState<string | null>(
+    demoMode?.initialSelectedRedditId ?? null,
+  );
   const [copied, setCopied] = useState(false);
   const [activeTone, setActiveTone] = useState<(typeof TONES)[number]>("Natural");
 
   const { data: dashboard } = api.team.getDashboard.useQuery(undefined, {
     staleTime: 60_000,
+    enabled: !demoMode,
   });
   const utils = api.useUtils();
 
@@ -132,8 +142,8 @@ export function SectionWorkspace({
     setTimeout(() => setCopied(false), 2000);
   }
 
-  const postingUsername = dashboard?.redditUsername ?? "your_account";
-  const postingKarma = dashboard?.reddit?.totalKarma ?? null;
+  const postingUsername = demoMode?.postingUsername ?? dashboard?.redditUsername ?? "your_account";
+  const postingKarma = demoMode?.postingKarma ?? dashboard?.reddit?.totalKarma ?? null;
 
   useEffect(() => {
     if (selectedRedditId && !items.some((i) => i.redditId === selectedRedditId)) {
@@ -417,17 +427,23 @@ export function SectionWorkspace({
           </div>
 
           <div className="sticky top-4 lg:max-h-[calc(100vh-8rem)]">
-            {sectionType === "reply" && (
-              <ProfileInformationPanel
-                username={selected?.author}
-                subreddit={selected?.subreddit}
-                relevanceScore={selected?.relevanceScore}
-                redditScore={selected?.redditScore}
-                styleConfidence={selected?.styleConfidence}
-              />
+            {demoMode ? (
+              demoMode.sidePanel
+            ) : (
+              <>
+                {sectionType === "reply" && (
+                  <ProfileInformationPanel
+                    username={selected?.author}
+                    subreddit={selected?.subreddit}
+                    relevanceScore={selected?.relevanceScore}
+                    redditScore={selected?.redditScore}
+                    styleConfidence={selected?.styleConfidence}
+                  />
+                )}
+                {sectionType === "warmup" && <WarmupSidePanel />}
+                {sectionType === "influence" && <InfluenceSidePanel />}
+              </>
             )}
-            {sectionType === "warmup" && <WarmupSidePanel />}
-            {sectionType === "influence" && <InfluenceSidePanel />}
           </div>
         </div>
       )}
