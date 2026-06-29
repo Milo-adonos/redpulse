@@ -88,11 +88,7 @@ export function ScrollChapter({
 }
 
 export function ChapterDivider() {
-  return (
-    <div className="mx-auto max-w-6xl px-5 sm:px-8">
-      <div className="h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-    </div>
-  );
+  return <div className="h-20" aria-hidden />;
 }
 
 export function StickyLabel({ children, className }: { children: React.ReactNode; className?: string }) {

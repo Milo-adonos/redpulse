@@ -131,7 +131,7 @@ export function OnboardingFlow() {
     onError: (e) => {
       setError(
         e.message.includes("Invalid")
-          ? "Impossible d'enregistrer le projet — vérifiez l'URL et réessayez."
+          ? "Impossible d'enregistrer le projet. Vérifiez l'URL et réessayez."
           : e.message,
       );
     },
@@ -172,7 +172,7 @@ export function OnboardingFlow() {
     setError("");
     const siteUrl = normalizeUrl(url);
     if (!siteUrl) {
-      setError("URL du site manquante — retournez à l'étape 1.");
+      setError("URL du site manquante. Retournez à l'étape 1.");
       setStep("site");
       return;
     }
@@ -205,10 +205,10 @@ export function OnboardingFlow() {
         </h2>
         <p className="mt-3 text-sm text-white/40">
           {step === "site" &&
-            "Collez votre URL — Claude analyse la landing page et génère un product prompt modifiable."}
+            "Collez votre URL. Claude analyse la landing page et génère un product prompt modifiable."}
           {step === "project" && "Comment appelez-vous ce projet ?"}
           {step === "team" &&
-            "Invitez des collaborateurs par email — accès immédiat ou pending à la création du compte."}
+            "Invitez des collaborateurs par email. Accès immédiat ou en attente à la création du compte."}
         </p>
       </div>
 
@@ -376,7 +376,7 @@ export function OnboardingFlow() {
                   </div>
                 )}
                 <p className="text-[10px] text-white/30">
-                  Pas d&apos;email envoyé — invitations enregistrées en base uniquement.
+                  Pas d&apos;email envoyé. Les invitations sont enregistrées en base uniquement.
                 </p>
                 {error && (
                   <p className="text-center text-sm text-red-400">{error}</p>

@@ -6,16 +6,46 @@ import { GlassPanel } from "./glass-panel";
 import { StickyLabel } from "./scroll-chapter";
 
 const streamItems = [
-  { sub: "r/SaaS", title: "Best way to reach early adopters?", match: true, delay: 0 },
-  { sub: "r/startups", title: "How do you validate on Reddit?", match: true, delay: 0.15 },
-  { sub: "r/marketing", title: "Organic growth without ads", match: false, delay: 0.3 },
+  {
+    sub: "r/SaaS",
+    user: "u/indie_founder",
+    time: "12m",
+    title: "Best tool to market on Reddit without getting banned?",
+    score: 94,
+    isNew: true,
+    tags: ["reddit marketing", "growth"],
+    delay: 0,
+  },
+  {
+    sub: "r/entrepreneur",
+    user: "u/bootstrapped_ceo",
+    time: "34m",
+    title: "Anyone found a way to get traction on Reddit that actually works?",
+    score: 81,
+    isNew: true,
+    tags: [] as string[],
+    delay: 0.15,
+  },
+  {
+    sub: "r/startups",
+    user: "u/growth_hacker22",
+    time: "1h",
+    title: "Reddit keeps banning my accounts when I try to promote anything",
+    score: 73,
+    isNew: false,
+    tags: [] as string[],
+    delay: 0.3,
+  },
 ];
+
+const GENERATED_REPLY =
+  "honestly same, i spent like 3 weeks trying different things and nothing stuck ngl. stumbled on redpulse a while back and it genuinely changed how i approach reddit marketing... still lowkey obsessed with how natural the replies feel";
 
 export function DiscoverDemo() {
   return (
     <GlassPanel className="overflow-hidden p-1">
       <div className="border-b border-white/[0.06] px-5 py-4">
-        <StickyLabel>Live stream · 3 subreddits</StickyLabel>
+        <StickyLabel>Live stream · r/SaaS · r/entrepreneur · r/startups</StickyLabel>
       </div>
       <div className="space-y-2 p-4">
         {streamItems.map((item) => (
@@ -28,21 +58,49 @@ export function DiscoverDemo() {
             className="group rounded-xl border border-white/[0.05] bg-white/[0.02] p-4 transition-colors hover:border-primary/20 hover:bg-white/[0.04]"
           >
             <div className="flex items-start justify-between gap-3">
-              <div>
-                <span className="text-[11px] font-medium text-primary">{item.sub}</span>
-                <p className="mt-1 text-sm text-white/80">{item.title}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] text-white/40">
+                  <span className="font-medium text-primary">{item.sub}</span>
+                  {" · "}
+                  {item.user}
+                  {" · "}
+                  {item.time}
+                </p>
+                <p className="mt-1.5 text-sm leading-snug text-white/80">
+                  {item.title}
+                </p>
+                <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] font-medium text-[#f97316]">
+                    Score : {item.score}
+                  </span>
+                  {item.isNew && (
+                    <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary">
+                      new
+                    </span>
+                  )}
+                </div>
+                {item.tags.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {item.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="rounded-full border border-white/[0.08] px-2 py-0.5 text-[10px] text-white/45"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-              {item.match && (
-                <motion.span
-                  initial={{ scale: 0.8, opacity: 0 }}
-                  whileInView={{ scale: 1, opacity: 1 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: item.delay + 0.2 }}
-                  className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] text-primary"
-                >
-                  match
-                </motion.span>
-              )}
+              <motion.span
+                initial={{ scale: 0.8, opacity: 0 }}
+                whileInView={{ scale: 1, opacity: 1 }}
+                viewport={{ once: true }}
+                transition={{ delay: item.delay + 0.2 }}
+                className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-400/90"
+              >
+                match
+              </motion.span>
             </div>
             <motion.div
               className="mt-3 h-0.5 overflow-hidden rounded-full bg-white/5"
@@ -51,7 +109,10 @@ export function DiscoverDemo() {
               viewport={{ once: true }}
               transition={{ delay: item.delay + 0.3, duration: 0.8 }}
             >
-              <div className="h-full w-2/3 rounded-full bg-gradient-to-r from-primary/60 to-transparent" />
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-primary/60 to-transparent"
+                style={{ width: `${item.score}%` }}
+              />
             </motion.div>
           </motion.div>
         ))}
@@ -84,8 +145,9 @@ export function ReplyDemo() {
         <div className="rounded-lg border border-white/[0.05] bg-black/30 p-4">
           <p className="text-[11px] text-white/35">Post cible</p>
           <p className="mt-1 text-sm text-white/70">
-            What tools do you use for Reddit marketing?
+            Best tool to market on Reddit without getting banned?
           </p>
+          <p className="mt-1 text-[11px] text-white/35">r/SaaS · u/indie_founder</p>
         </div>
         <motion.div
           animate={{ opacity: hovered ? 1 : 0.5, y: hovered ? 0 : 4 }}
@@ -94,9 +156,7 @@ export function ReplyDemo() {
         >
           <p className="text-[11px] text-primary/70">Réponse générée</p>
           <p className="mt-2 text-sm leading-relaxed text-white/75">
-            {hovered
-              ? "J'ai testé plusieurs approches — ce qui fonctionne vraiment, c'est d'être présent au bon moment. RedPulse m'aide à repérer les threads pertinents sans passer mes journées à scroller."
-              : "Génération en cours…"}
+            {hovered ? GENERATED_REPLY : "Génération en cours…"}
           </p>
         </motion.div>
       </div>

@@ -24,7 +24,7 @@ export default function HomePage() {
         Aller au contenu
       </a>
       <LandingNav />
-      <main id="main" className="relative overflow-x-hidden bg-black">
+      <main id="main" className="relative overflow-x-hidden bg-[#080808]">
         <LandingHero />
 
         <div id="discover" className="relative">
@@ -32,10 +32,9 @@ export default function HomePage() {
           <ScrollChapter
             id="product"
             chapter="01 · Découverte"
-            title="Veille intelligente"
-            headline="Chaque conversation pertinente, au moment où elle naît."
-            body="RedPulse écoute les subreddits qui comptent pour vous. Filtres, scores, auteurs — seules les opportunités réelles remontent."
-            quote="Le timing, c'est 80 % de la conversion sur Reddit."
+            title="Veille temps réel"
+            headline="Trouve les conversations qui comptent."
+            body="RedPulse scrape Reddit en temps réel et identifie les posts où quelqu'un cherche exactement ce que vous faites. Plus besoin de scroller des heures."
             icon="discover"
             align="left"
           >
@@ -46,9 +45,9 @@ export default function HomePage() {
           <ScrollChapter
             id="reply"
             chapter="02 · Réponse"
-            title="Intelligence contextuelle"
-            headline="Des mots qui sonnent humains, pas automatisés."
-            body="Claude analyse le fil, le ton du subreddit et votre positionnement. Chaque réponse est calibrée pour convertir sans alarmer."
+            title="Réponses indétectables"
+            headline="Des réponses qui passent pour humaines."
+            body="Chaque réponse est générée dans le style d'écriture exact du subreddit. Mêmes abréviations, même ton, même longueur. Personne ne voit la différence."
             icon="reply"
             align="right"
           >

@@ -7,7 +7,6 @@ import { motion } from "framer-motion";
 export function VisionSection() {
   return (
     <section id="vision" className="relative scroll-mt-24 py-32 sm:py-40">
-      <div className="pointer-events-none absolute inset-0 bg-hero-mesh opacity-60" />
       <div className="relative mx-auto max-w-6xl px-5 sm:px-8">
         <motion.div
           initial={{ opacity: 0, y: 32 }}
@@ -53,13 +52,13 @@ export function VisionSection() {
 
 export function LandingFooter() {
   return (
-    <footer className="border-t border-white/[0.04] py-12">
+    <footer className="py-12">
       <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-8 px-5 sm:flex-row sm:px-8">
         <Link href="/">
           <Logo theme="light" variant="icon" />
         </Link>
         <p className="text-[12px] text-white/30">
-          © {new Date().getFullYear()} — Intelligence Reddit
+          © {new Date().getFullYear()} RedPulse · Intelligence Reddit
         </p>
         <div className="flex gap-6 text-[12px] text-white/35">
           <a

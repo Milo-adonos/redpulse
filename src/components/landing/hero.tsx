@@ -4,7 +4,8 @@ import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { FeaturesShowcase } from "./features-showcase";
-import { ux } from "@/lib/ux-copy";
+import { HeroFeaturesTransition } from "./hero-features-transition";
+import { KeyFeatures } from "./key-features";
 
 function isValidDomain(input: string): boolean {
   const trimmed = input
@@ -50,26 +51,19 @@ export function LandingHero() {
   }
 
   return (
-    <section
-      id="hero"
-      className="relative flex min-h-[100svh] flex-col justify-center overflow-hidden pt-16"
-    >
-      <div className="pointer-events-none absolute inset-0 bg-hero-mesh" />
-      <div className="pointer-events-none absolute inset-0 bg-grid opacity-40" />
-
-      <div className="relative mx-auto flex w-full max-w-6xl flex-col items-center px-5 text-center sm:px-8">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-          className="mx-auto max-w-4xl"
-        >
-          <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.15em] text-primary">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-            {ux.brand.tagline}
-          </span>
-
-          <h1 className="mt-8 text-balance text-[clamp(2.75rem,7.5vw,5rem)] font-bold leading-[1.02] tracking-[-0.045em] text-white">
+    <>
+      <section
+        id="hero"
+        className="relative overflow-hidden bg-[#080808] pb-20 pt-[120px]"
+      >
+        <div className="relative mx-auto w-full max-w-6xl px-5 text-center sm:px-8">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+            className="mx-auto max-w-4xl"
+          >
+          <h1 className="text-balance text-[clamp(2.75rem,8vw,5.25rem)] font-bold leading-[1.02] tracking-[-0.045em] text-white">
             Reddit devient votre{" "}
             <span className="relative inline-block text-primary">
               avantage
@@ -83,14 +77,14 @@ export function LandingHero() {
             .
           </h1>
 
-          <p className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-white/45 sm:text-xl">
+          <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed text-white/45 sm:text-lg">
             Détectez les conversations qui comptent. Répondez avec précision.
-            Protégez votre réputation — sans bruit, sans risque.
+            Protégez votre réputation sans bruit et sans risque.
           </p>
 
           <form
             onSubmit={handleSubmit}
-            className="mx-auto mt-10 flex w-full max-w-[560px] flex-col items-stretch gap-3 sm:flex-row"
+            className="mx-auto mt-6 flex w-full max-w-[560px] flex-col items-stretch gap-3 sm:flex-row"
           >
             <input
               type="text"
@@ -112,10 +106,22 @@ export function LandingHero() {
           <p className="mt-3 text-[13px] text-[#666666]">
             Analyse gratuite · 30 secondes
           </p>
-        </motion.div>
-      </div>
+          </motion.div>
+        </div>
 
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-20"
+          style={{
+            background:
+              "linear-gradient(to bottom, transparent, rgba(249, 115, 22, 0.03))",
+          }}
+          aria-hidden
+        />
+      </section>
+
+      <HeroFeaturesTransition />
       <FeaturesShowcase />
-    </section>
+      <KeyFeatures />
+    </>
   );
 }

@@ -9,7 +9,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "RedPulse — Intelligence Reddit",
+  title: "RedPulse · Intelligence Reddit",
   description:
     "Détectez, répondez et protégez votre présence Reddit avec précision.",
   icons: { icon: "/icon.svg" },

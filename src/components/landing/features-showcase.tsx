@@ -66,8 +66,16 @@ export function FeaturesShowcase() {
   const activeMeta = TABS.find((t) => t.id === activeTab)!;
 
   return (
-    <section className="bg-[#080808] py-16 sm:py-20">
-      <div className="mx-auto max-w-6xl px-5 sm:px-8">
+    <section className="relative w-full bg-[#0a0a0a] pb-16 pt-20 sm:pb-20">
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 h-20"
+        style={{
+          background:
+            "linear-gradient(to bottom, rgba(249, 115, 22, 0.03), transparent)",
+        }}
+        aria-hidden
+      />
+      <div className="relative mx-auto max-w-6xl px-5 sm:px-8">
         <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
           {TABS.map((tab) => {
             const Icon = tab.icon;
@@ -91,7 +99,7 @@ export function FeaturesShowcase() {
           })}
         </div>
 
-        <div className="mx-auto mt-8 max-w-[900px] overflow-hidden rounded-xl border border-[#1a1a1a] bg-[#111111]">
+        <div className="mx-auto mt-5 max-w-[900px] overflow-hidden rounded-xl border border-[#1a1a1a] bg-[#111111]">
           <MacWindowBar title={activeMeta.windowTitle} />
           <AnimatePresence mode="wait">
             <motion.div

@@ -21,7 +21,7 @@ export const ux = {
   empty: {
     discovery: {
       title: "Silence radio… pour l'instant",
-      body: "Aucune conversation ne correspond à vos filtres. RedPulse écoute — la prochaine opportunité arrive.",
+      body: "Aucune conversation ne correspond à vos filtres. RedPulse écoute. La prochaine opportunité arrive.",
       cta: "Ajuster les filtres",
     },
     replies: {
@@ -36,7 +36,7 @@ export const ux = {
     },
     team: {
       title: "Vous volez solo",
-      body: "Invitez votre équipe — Reddit se gagne mieux à plusieurs.",
+      body: "Invitez votre équipe. Reddit se gagne mieux à plusieurs.",
       cta: "Inviter un membre",
     },
   },
@@ -55,7 +55,7 @@ export const ux = {
     steps: ["Produit", "Projet", "Équipe"] as const,
     productTitle: "Collez votre URL. On comprend votre produit.",
     projectTitle: "Donnez un nom à votre projet.",
-    teamTitle: "Invitez votre équipe — ou avancez seul·e.",
+    teamTitle: "Invitez votre équipe, ou avancez seul·e.",
     successTitle: "Projet créé. Bienvenue à bord.",
     successBody:
       "Vos invité·es reçoivent un accès immédiat. Vous pouvez piloter tout depuis le dashboard.",
@@ -63,16 +63,16 @@ export const ux = {
       url: "https://votre-saas.com",
       projectName: "Ex. Nova Growth, Acme B2B…",
       invites: "collègue@startup.io, partenaire@equipe.com",
-      description: "Décrivez ce que vous vendez — en une phrase claire.",
+      description: "Décrivez ce que vous vendez en une phrase claire.",
     },
   },
   hints: {
-    url: "Collez l'URL de votre landing — on s'occupe du reste.",
+    url: "Collez l'URL de votre landing. On s'occupe du reste.",
     description: "Plus c'est précis, plus les réponses IA sonnent humaines.",
     invite: "Séparez les emails par des virgules. Accès immédiat pour chaque invité·e.",
     banRisk: "Score bas = bonne nouvelle. Reddit vous remercie.",
     validation: "Validation humaine requise avant chaque publication.",
-    darkMode: "Mode sombre activé — palette secondaire apaisante pour vos longues sessions.",
+    darkMode: "Mode sombre activé. Palette secondaire apaisante pour vos longues sessions.",
   },
   actions: {
     reply: "Répondre",
@@ -81,7 +81,7 @@ export const ux = {
     dm: "DM",
   },
   toast: {
-    analyzed: "Site analysé — description générée.",
+    analyzed: "Site analysé. Description générée.",
     enriched: "Description optimisée par Claude.",
     projectCreated: "Projet créé. Bienvenue à bord.",
     settingsSaved: "Paramètres enregistrés.",
