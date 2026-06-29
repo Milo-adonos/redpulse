@@ -93,6 +93,7 @@ export async function activateProjectDraft(
       name: draft.projectName,
       siteUrl: draft.siteUrl,
       description: draft.description,
+      productPrompt: draft.productPrompt ?? draft.description,
       keywords,
     })
     .onConflictDoUpdate({
@@ -101,6 +102,7 @@ export async function activateProjectDraft(
         name: draft.projectName,
         siteUrl: draft.siteUrl,
         description: draft.description,
+        productPrompt: draft.productPrompt ?? draft.description,
         keywords,
         updatedAt: new Date(),
       },

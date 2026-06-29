@@ -3,6 +3,8 @@ import {
   finalizeSubredditList,
   inferSubredditsFromText,
 } from "@/server/reddit/subreddit-discovery";
+import { callAnthropic } from "@/server/ai/client";
+import { MAX_TOKENS_ONBOARDING } from "@/server/ai/constants";
 
 export function extractKeywords(text: string): string[] {
   return expandKeywords([], text).slice(0, 15);
@@ -62,29 +64,18 @@ async function analyzeWithAi(input: {
   description: string;
   pageText: string;
   url: string;
-}): Promise<ProductAnalysis | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
-
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5-20251001",
-      max_tokens: 900,
-      messages: [
-        {
-          role: "user",
-          content: `Analyze this product website for Reddit marketing. Return ONLY JSON:
+}): Promise<ProductAnalysis> {
+  const text = await callAnthropic({
+    max_tokens: MAX_TOKENS_ONBOARDING,
+    messages: [
+      {
+        role: "user",
+        content: `Analyze for Reddit marketing. Return ONLY JSON:
 {
   "productName": "short name",
-  "description": "6-8 sentences English: what it does, who it's for, pain points, how to mention naturally on Reddit",
-  "keywords": ["12-18 SHORT terms, 1-3 words each, niche-specific — e.g. nail, manicure, salon, NOT marketing/saas/startup"],
-  "suggestedSubreddits": ["8-10 real subreddit names WITHOUT r/ where TARGET CUSTOMERS post. For nail/beauty: Nails, NailArt, beauty, SalonOwners — NEVER SaaS/startups/marketing unless dev tool"],
+  "description": "5-6 sentences: what it does, who for, pain points",
+  "keywords": ["12-18 SHORT niche terms, 1-3w each"],
+  "suggestedSubreddits": ["8-10 real subreddit names where TARGET CUSTOMERS post"],
   "targetAudience": "one sentence",
   "valueProposition": "one sentence"
 }
@@ -92,48 +83,21 @@ async function analyzeWithAi(input: {
 Title: ${input.title}
 Meta: ${input.description || "n/a"}
 URL: ${input.url}
-Content: ${input.pageText.slice(0, 2000) || "n/a"}`,
-        },
-      ],
-    }),
+Content: ${input.pageText.slice(0, 1500) || "n/a"}`,
+      },
+    ],
   });
 
-  if (!res.ok) return null;
-
-  const data = (await res.json()) as {
-    content: Array<{ type: string; text?: string }>;
-  };
-  const raw = data.content.find((b) => b.type === "text")?.text ?? "";
   try {
-    return JSON.parse(raw.replace(/^```json\s*|\s*```$/g, "").trim()) as ProductAnalysis;
+    return JSON.parse(text.replace(/^```json\s*|\s*```$/g, "").trim()) as ProductAnalysis;
   } catch {
-    return null;
+    throw new Error("Réponse Claude invalide pour l'analyse produit");
   }
-}
-
-function fallbackAnalysis(meta: {
-  title: string;
-  description: string;
-  pageText: string;
-  url: string;
-}): ProductAnalysis {
-  const base = [meta.description, meta.pageText.slice(0, 600)].filter(Boolean).join(" ");
-  const inferred = inferSubredditsFromText(`${meta.title} ${base}`, 8);
-
-  return {
-    productName: meta.title.split("|")[0]?.trim() || meta.title,
-    description: base || `${meta.title}. ${meta.url}`,
-    keywords: expandKeywords([], meta.title, base),
-    suggestedSubreddits: inferred,
-    targetAudience: "People interested in this product",
-    valueProposition: meta.description || meta.title,
-  };
 }
 
 export async function analyzeProductFromSite(url: string) {
   const meta = await fetchSiteMetadata(url);
-  const ai = await analyzeWithAi(meta);
-  const analysis = ai ?? fallbackAnalysis(meta);
+  const analysis = await analyzeWithAi(meta);
 
   const contextText = [
     analysis.productName,
@@ -151,16 +115,22 @@ export async function analyzeProductFromSite(url: string) {
     limit: 10,
   });
 
+  const productPrompt = [
+    `Product: ${analysis.productName || meta.title}`,
+    analysis.description.trim(),
+    "",
+    `Target audience: ${analysis.targetAudience}`,
+    `Problem solved: ${analysis.valueProposition}`,
+    `Website: ${meta.url}`,
+    "",
+    "Use this context for all Reddit message generation. Write naturally, never sound like marketing.",
+  ].join("\n");
+
   return {
     url: meta.url,
     title: analysis.productName || meta.title,
-    suggestedDescription: [
-      analysis.description.trim(),
-      "",
-      `Target audience: ${analysis.targetAudience}`,
-      `Value proposition: ${analysis.valueProposition}`,
-      `Website: ${meta.url}`,
-    ].join("\n"),
+    suggestedDescription: productPrompt,
+    productPrompt,
     keywords,
     subreddits,
     targetAudience: analysis.targetAudience,

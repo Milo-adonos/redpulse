@@ -2,16 +2,22 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
+import { Menu, X } from "lucide-react";
+import { useState } from "react";
 import { Logo } from "@/components/brand/logo";
+import { FeaturesDropdown } from "@/components/landing/features-dropdown";
 import { cn } from "@/lib/utils";
 
-const links = [
-  { href: "#start", label: "Démarrer" },
-  { href: "#discover", label: "Produit" },
-  { href: "#vision", label: "Vision" },
+const MOBILE_FEATURES = [
+  { href: "/features#reply", label: "Reply" },
+  { href: "/features#warmup", label: "Warmup" },
+  { href: "/features#influence", label: "Influence" },
+  { href: "/features#analytics", label: "Analytics" },
 ];
 
 export function LandingNav() {
+  const [mobileOpen, setMobileOpen] = useState(false);
+
   return (
     <motion.header
       initial={{ opacity: 0, y: -12 }}
@@ -25,15 +31,19 @@ export function LandingNav() {
         </Link>
 
         <div className="hidden items-center gap-8 md:flex">
-          {links.map((link) => (
-            <a
-              key={link.href}
-              href={link.href}
-              className="text-[13px] text-white/50 transition-colors hover:text-white"
-            >
-              {link.label}
-            </a>
-          ))}
+          <FeaturesDropdown />
+          <Link
+            href="/pricing"
+            className="text-[13px] text-white/50 transition-colors hover:text-white"
+          >
+            Pricing
+          </Link>
+          <Link
+            href="/customers"
+            className="text-[13px] text-white/50 transition-colors hover:text-white"
+          >
+            Customers
+          </Link>
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3">
@@ -44,16 +54,74 @@ export function LandingNav() {
             Connexion
           </Link>
           <Link
-            href="/dashboard"
+            href="/#hero"
             className={cn(
-              "rounded-full bg-white px-4 py-2 text-[13px] font-medium text-black",
-              "transition-all hover:bg-white/90 hover:shadow-glow-white",
+              "rounded-lg bg-[#f97316] px-4 py-2 text-[13px] font-medium text-white",
+              "transition-all hover:bg-[#ea6c0a]",
             )}
           >
-            Explorer
+            Commencer
           </Link>
+          <button
+            type="button"
+            aria-label={mobileOpen ? "Fermer le menu" : "Ouvrir le menu"}
+            aria-expanded={mobileOpen}
+            onClick={() => setMobileOpen((open) => !open)}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-white/70 transition-colors hover:bg-white/[0.06] hover:text-white md:hidden"
+          >
+            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
         </div>
       </nav>
+
+      {mobileOpen && (
+        <div className="border-t border-white/[0.06] bg-black/95 px-5 py-4 backdrop-blur-xl md:hidden">
+          <div className="space-y-4">
+            <div>
+              <Link
+                href="/features"
+                onClick={() => setMobileOpen(false)}
+                className="text-[14px] font-medium text-white"
+              >
+                Features
+              </Link>
+              <div className="mt-2 space-y-1 pl-3">
+                {MOBILE_FEATURES.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setMobileOpen(false)}
+                    className="block py-1.5 text-[13px] text-white/50 transition-colors hover:text-white"
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </div>
+            </div>
+            <Link
+              href="/pricing"
+              onClick={() => setMobileOpen(false)}
+              className="block text-[14px] text-white/70 transition-colors hover:text-white"
+            >
+              Pricing
+            </Link>
+            <Link
+              href="/customers"
+              onClick={() => setMobileOpen(false)}
+              className="block text-[14px] text-white/70 transition-colors hover:text-white"
+            >
+              Customers
+            </Link>
+            <Link
+              href="/login"
+              onClick={() => setMobileOpen(false)}
+              className="block text-[14px] text-white/70 transition-colors hover:text-white sm:hidden"
+            >
+              Connexion
+            </Link>
+          </div>
+        </div>
+      )}
     </motion.header>
   );
 }

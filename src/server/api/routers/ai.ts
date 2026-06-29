@@ -28,21 +28,6 @@ export const aiRouter = createTRPCRouter({
     if (!process.env.ANTHROPIC_API_KEY) {
       return { ok: false, message: "Clé API manquante" };
     }
-
-    try {
-      const result = await generateRedditReply({
-        postTitle: "What tools do you use for Reddit marketing?",
-        subreddit: "SaaS",
-        productContext: "RedPulse — automation Reddit",
-        mentionProduct: false,
-        tone: "helpful",
-      });
-      return { ok: true, sample: result.body.slice(0, 80) + "..." };
-    } catch (error) {
-      return {
-        ok: false,
-        message: error instanceof Error ? error.message : "Erreur inconnue",
-      };
-    }
+    return { ok: true, message: "Clé API configurée" };
   }),
 });

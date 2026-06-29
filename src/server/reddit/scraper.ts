@@ -1,26 +1,28 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Database } from "@/server/db";
 import {
   discoveredPosts,
   keywordFilters,
   projects,
-  teams,
+  scrapedComments,
 } from "@/server/db/schema";
-import {
-  buildRedditPostUrl,
-  buildRecommendationSearchQueries,
-  estimateIntentScore,
-  fetchSubredditPosts,
-  fetchSubredditPostsByQuery,
-  isRelevantForReply,
-  isRelevantToIcp,
-  matchKeywords,
-} from "@/server/reddit/client";
+import { scorePostRelevance } from "@/server/ai/relevance-scoring";
+import { ensureSubredditVoicesForTeam } from "@/server/reddit/subreddit-voice";
+import { buildRedditPostUrl } from "@/server/reddit/client";
 import { redditDateFromUnix } from "@/server/reddit/freshness";
+import {
+  fetchSubredditJson,
+  fetchPostCommentsJson,
+  buildRedditPostUrlFromJson,
+  type RedditJsonPost,
+} from "@/server/reddit/reddit-json";
 import {
   discoverSubredditsForProduct,
   expandKeywords,
 } from "@/server/reddit/subreddit-discovery";
+
+const POSTS_PER_SUBREDDIT = 25;
+const COMMENTS_PER_POST = 10;
 
 export function buildTeamKeywords(
   filterKeywords: string[] | undefined,
@@ -35,6 +37,22 @@ export function buildTeamKeywords(
     project?.name ?? "",
     project?.description ?? "",
   ).slice(0, 20);
+}
+
+function jsonToListingPost(post: RedditJsonPost) {
+  return {
+    id: post.id,
+    subreddit: post.subreddit,
+    title: post.title,
+    selftext: post.selftext,
+    author: post.author,
+    score: post.score,
+    num_comments: post.num_comments,
+    url: post.url,
+    permalink: buildRedditPostUrlFromJson(post),
+    created_utc: post.created_utc,
+    link_flair_text: post.link_flair_text,
+  };
 }
 
 async function persistDiscoveredSubreddits(
@@ -60,34 +78,6 @@ async function persistDiscoveredSubreddits(
     keywords,
     subreddits,
     isActive: true,
-  });
-}
-
-async function discoverForTeam(
-  db: Database,
-  teamId: string,
-  limit = 10,
-): Promise<string[]> {
-  const [filter, project] = await Promise.all([
-    db.query.keywordFilters.findFirst({
-      where: and(
-        eq(keywordFilters.teamId, teamId),
-        eq(keywordFilters.isActive, true),
-      ),
-    }),
-    db.query.projects.findFirst({
-      where: eq(projects.teamId, teamId),
-    }),
-  ]);
-
-  const keywords = buildTeamKeywords(filter?.keywords, project ?? null);
-
-  return discoverSubredditsForProduct({
-    keywords,
-    productName: project?.name,
-    description: project?.description,
-    seedSubreddits: filter?.subreddits ?? [],
-    limit,
   });
 }
 
@@ -129,128 +119,189 @@ export async function getTeamTargeting(db: Database, teamId: string) {
   ]);
 
   const keywords = buildTeamKeywords(filter?.keywords, project ?? null);
-
-  const subreddits = filter?.subreddits?.length
-    ? filter.subreddits.map((s) => s.replace(/^r\//i, ""))
-    : await discoverForTeam(db, teamId, 10);
-
-  if (!filter?.subreddits?.length) {
-    await persistDiscoveredSubreddits(db, teamId, subreddits, keywords);
-  }
+  const subreddits = (filter?.subreddits ?? [])
+    .map((s) => s.replace(/^r\//i, ""))
+    .slice(0, 10);
 
   return { subreddits, keywords };
 }
 
-export async function scrapeTeamDiscovery(db: Database, teamId: string) {
-  const { subreddits, keywords } = await getTeamTargeting(db, teamId);
+type IngestPost = {
+  id: string;
+  subreddit: string;
+  title: string;
+  selftext: string;
+  author: string;
+  score: number;
+  num_comments: number;
+  url: string;
+  permalink: string;
+  created_utc: number;
+  link_flair_text?: string | null;
+};
 
-  let inserted = 0;
-  let lastError: Error | null = null;
-  let fetchedAny = false;
-  const seenIds = new Set<string>();
-
-  async function ingestPost(post: Awaited<ReturnType<typeof fetchSubredditPosts>>[number]) {
-    if (seenIds.has(post.id)) return;
-    seenIds.add(post.id);
-
-    const combined = `${post.title} ${post.selftext ?? ""}`;
-    if (
-      !isRelevantForReply(
-        post.title,
-        post.selftext ?? "",
-        keywords,
-        subreddits,
-        post.subreddit,
-      ) &&
-      !isRelevantToIcp(
-        post.title,
-        post.selftext ?? "",
-        keywords,
-        subreddits,
-        post.subreddit,
-      )
-    ) {
-      return;
-    }
-
-    const matched = matchKeywords(combined, keywords);
-    const intentScore = estimateIntentScore(
-      post.title,
-      post.selftext ?? "",
-      matched,
-    );
-
+async function storeComments(
+  db: Database,
+  teamId: string,
+  discoveredPostId: string,
+  subreddit: string,
+  postId: string,
+) {
+  const comments = await fetchPostCommentsJson(
+    subreddit,
+    postId,
+    COMMENTS_PER_POST,
+  );
+  for (const comment of comments) {
     try {
       await db
-        .insert(discoveredPosts)
+        .insert(scrapedComments)
         .values({
           teamId,
-          redditId: post.id,
-          subreddit: post.subreddit,
-          title: post.title,
-          body: post.selftext || null,
-          author: post.author,
-          score: post.score,
-          numComments: post.num_comments,
-          url: post.url,
-          permalink: buildRedditPostUrl(
-            post.subreddit,
-            post.id,
-            post.permalink,
-            post.url,
-          ),
-          matchedKeywords: matched,
-          intentScore: String(intentScore),
-          discoveredAt: redditDateFromUnix(post.created_utc),
+          discoveredPostId,
+          redditId: comment.id,
+          author: comment.author,
+          body: comment.body,
+          score: comment.score,
         })
         .onConflictDoNothing();
-      inserted++;
     } catch {
-      // duplicate or race
+      // duplicate
     }
   }
+}
+
+/** Reddit fetch only — no Anthropic calls. */
+export async function scrapeTeamDiscovery(db: Database, teamId: string) {
+  const { subreddits } = await getTeamTargeting(db, teamId);
+
+  if (!subreddits.length) {
+    return { inserted: 0, subreddits: 0 };
+  }
+
+  const existingRows = await db.query.discoveredPosts.findMany({
+    where: eq(discoveredPosts.teamId, teamId),
+    columns: { redditId: true },
+  });
+  const existingIds = new Set(existingRows.map((r) => r.redditId));
+
+  let inserted = 0;
 
   for (const sub of subreddits) {
-    let posts: Awaited<ReturnType<typeof fetchSubredditPosts>> = [];
-    try {
-      posts = await fetchSubredditPosts(sub, 20, "new", keywords);
-      if (posts.length > 0) fetchedAny = true;
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      console.error(`[scraper] r/${sub}:`, error);
-      posts = [];
-    }
+    const jsonPosts = await fetchSubredditJson(sub, POSTS_PER_SUBREDDIT, "new", {
+      skipAgeFilter: true,
+    });
+    const posts = jsonPosts.map(jsonToListingPost);
 
     for (const post of posts) {
-      await ingestPost(post);
-    }
+      if (existingIds.has(post.id)) continue;
 
-    for (const query of buildRecommendationSearchQueries(keywords)) {
       try {
-        const recPosts = await fetchSubredditPostsByQuery(sub, query, 8);
-        if (recPosts.length > 0) fetchedAny = true;
-        for (const post of recPosts) {
-          await ingestPost(post);
+        const [row] = await db
+          .insert(discoveredPosts)
+          .values({
+            teamId,
+            redditId: post.id,
+            subreddit: post.subreddit,
+            title: post.title,
+            body: post.selftext || null,
+            author: post.author,
+            score: post.score,
+            numComments: post.num_comments,
+            url: post.url,
+            permalink: buildRedditPostUrl(
+              post.subreddit,
+              post.id,
+              post.permalink,
+              post.url,
+            ),
+            flair: post.link_flair_text ?? null,
+            discoveredAt: redditDateFromUnix(post.created_utc),
+          })
+          .onConflictDoNothing()
+          .returning({ id: discoveredPosts.id });
+
+        if (row) {
+          inserted++;
+          existingIds.add(post.id);
+          await storeComments(db, teamId, row.id, post.subreddit, post.id);
         }
-      } catch (error) {
-        console.warn(`[scraper] r/${sub} search "${query}":`, error);
+      } catch {
+        // duplicate or race
       }
     }
-  }
-
-  if (!fetchedAny && lastError) {
-    console.warn(`[scraper] team ${teamId}:`, lastError.message);
   }
 
   return { inserted, subreddits: subreddits.length };
 }
 
+/** Score posts that have not been scored yet — Claude haiku, max 50 tokens. */
+export async function scoreUnscoredPosts(db: Database, teamId: string) {
+  const project = await db.query.projects.findFirst({
+    where: eq(projects.teamId, teamId),
+  });
+
+  const productPrompt =
+    project?.productPrompt?.trim() ||
+    project?.description?.trim() ||
+    project?.name ||
+    "";
+
+  if (!productPrompt) return { scored: 0 };
+
+  const unscored = await db.query.discoveredPosts.findMany({
+    where: and(
+      eq(discoveredPosts.teamId, teamId),
+      isNull(discoveredPosts.relevanceScore),
+    ),
+    limit: 50,
+  });
+
+  let scored = 0;
+
+  for (const post of unscored) {
+    const relevance = await scorePostRelevance({
+      productPrompt,
+      title: post.title,
+      body: post.body ?? "",
+    });
+
+    await db
+      .update(discoveredPosts)
+      .set({
+        relevanceScore: relevance.score,
+        relevanceSection: relevance.section,
+        relevanceReason: relevance.reason,
+        sectionScores: {
+          reply: relevance.section === "reply" ? relevance.score : 0,
+          warmup: relevance.section === "warmup" ? relevance.score : 0,
+          influence: relevance.section === "influence" ? relevance.score : 0,
+        },
+      })
+      .where(eq(discoveredPosts.id, post.id));
+
+    scored++;
+  }
+
+  return { scored };
+}
+
+/** Scrape Reddit then score new posts — triggered manually only. */
+export async function scrapeAndScoreTeam(db: Database, teamId: string) {
+  const scrapeResult = await scrapeTeamDiscovery(db, teamId);
+  const scoreResult = await scoreUnscoredPosts(db, teamId);
+  const { subreddits } = await getTeamTargeting(db, teamId);
+  const voiceResult = await ensureSubredditVoicesForTeam(db, teamId, subreddits);
+  return { ...scrapeResult, ...scoreResult, voicesAnalyzed: voiceResult.analyzed };
+}
+
 export async function scrapeAllTeams(db: Database) {
+  const { teams } = await import("@/server/db/schema");
   const allTeams = await db.select({ id: teams.id }).from(teams);
   const results = [];
 
   for (const team of allTeams) {
-    const result = await scrapeTeamDiscovery(db, team.id);
+    const result = await scrapeAndScoreTeam(db, team.id);
     results.push({ teamId: team.id, ...result });
   }
 

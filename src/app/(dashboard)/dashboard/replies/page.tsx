@@ -1,15 +1,15 @@
 "use client";
 
-import { RedditMessageWorkspace } from "@/components/dashboard/reddit-message-workspace";
-import { useRedditMessageWorkspace } from "@/components/dashboard/use-reddit-message-workspace";
+import { SectionWorkspace } from "@/components/dashboard/section-workspace";
+import { useSectionWorkspace } from "@/components/dashboard/use-section-workspace";
 
 export default function RepliesPage() {
-  const workspace = useRedditMessageWorkspace("reply");
+  const workspace = useSectionWorkspace("reply");
 
   return (
-    <RedditMessageWorkspace
+    <SectionWorkspace
       title="Reply"
-      description="Posts ICP + gens qui cherchent un outil/site — réponses avec mention naturelle du produit."
+      sectionType="reply"
       {...workspace}
     />
   );

@@ -11,11 +11,24 @@ import {
   teamSettings,
   users,
 } from "@/server/db/schema";
+import {
+  buildDashboardData,
+  refreshDashboard,
+} from "@/server/dashboard/metrics";
 import { processTeamInvite } from "@/server/team/context";
+import { getPlanUsage } from "@/server/plan/usage";
+import { PLANS } from "@/lib/plans";
+
+const SECTION_LABELS: Record<string, string> = {
+  reply: "Reply",
+  warmup: "Warmup",
+  influence: "Influence",
+  post: "Posts",
+};
 
 export const teamRouter = createTRPCRouter({
   getContext: teamProcedure.query(async ({ ctx }) => {
-    const [project, team, memberCount, settings] = await Promise.all([
+    const [project, team, memberCount, settings, owner, planUsage] = await Promise.all([
       ctx.db!.query.projects.findFirst({
         where: eq(projects.teamId, ctx.teamId),
       }),
@@ -29,7 +42,13 @@ export const teamRouter = createTRPCRouter({
       ctx.db!.query.teamSettings.findFirst({
         where: eq(teamSettings.teamId, ctx.teamId),
       }),
+      ctx.db!.query.users.findFirst({
+        where: eq(users.id, ctx.session.user.id),
+      }),
+      getPlanUsage(ctx.db!, ctx.teamId),
     ]);
+
+    const planInfo = PLANS[planUsage.plan];
 
     return {
       teamId: ctx.teamId,
@@ -45,6 +64,20 @@ export const teamRouter = createTRPCRouter({
         : null,
       memberCount: memberCount[0]?.count ?? 0,
       lastSyncedAt: settings?.updatedAt ?? null,
+      user: owner
+        ? {
+            firstName: owner.firstName,
+            lastName: owner.lastName,
+            name: owner.name,
+            email: owner.email,
+          }
+        : null,
+      plan: {
+        id: planUsage.plan,
+        name: planInfo.name,
+        messagesUsed: planUsage.messagesUsed,
+        messagesLimit: planUsage.messagesLimit,
+      },
     };
   }),
 
@@ -56,6 +89,28 @@ export const teamRouter = createTRPCRouter({
     const sent = rows.filter((m) => m.isSent);
     const generatedCount = rows.length;
     const sentCount = sent.length;
+
+    const sectionCounts = new Map<string, number>();
+    const allowedSections = ["reply", "warmup", "influence"] as const;
+    for (const msg of rows) {
+      if (!allowedSections.includes(msg.type as (typeof allowedSections)[number])) continue;
+      sectionCounts.set(msg.type, (sectionCounts.get(msg.type) ?? 0) + 1);
+    }
+    const generatedInSections = [...sectionCounts.values()].reduce((a, b) => a + b, 0);
+    const sectionSplit = [...sectionCounts.entries()].map(([type, count]) => ({
+      type,
+      label: SECTION_LABELS[type] ?? type,
+      count,
+      pct: generatedInSections ? Math.round((count / generatedInSections) * 100) : 0,
+    }));
+
+    const avgBanScore =
+      rows.length > 0
+        ? Math.round(
+            (rows.reduce((sum, m) => sum + (m.safetyScore ?? 0), 0) / rows.length) *
+              10,
+          ) / 10
+        : 0;
 
     const subredditCounts = new Map<string, number>();
     for (const msg of sent) {
@@ -100,11 +155,21 @@ export const teamRouter = createTRPCRouter({
               eq(generatedMessages.isSent, true),
             ),
           );
+        const generatedByUser = await ctx.db!
+          .select({ count: count() })
+          .from(generatedMessages)
+          .where(
+            and(
+              eq(generatedMessages.teamId, ctx.teamId),
+              eq(generatedMessages.generatedByUserId, m.userId),
+            ),
+          );
         return {
           name: m.name ?? m.email,
           email: m.email,
           role: m.role,
           messagesSent: sentByUser[0]?.count ?? 0,
+          messagesGenerated: generatedByUser[0]?.count ?? 0,
         };
       }),
     );
@@ -112,9 +177,19 @@ export const teamRouter = createTRPCRouter({
     return {
       sentCount,
       generatedCount,
+      sectionSplit,
+      avgBanScore,
       subredditSplit,
       teamActivity,
     };
+  }),
+
+  getDashboard: teamProcedure.query(async ({ ctx }) => {
+    return buildDashboardData(ctx.db!, ctx.teamId);
+  }),
+
+  refreshDashboard: teamProcedure.mutation(async ({ ctx }) => {
+    return refreshDashboard(ctx.db!, ctx.teamId);
   }),
 
   listMembers: teamProcedure.query(async ({ ctx }) => {

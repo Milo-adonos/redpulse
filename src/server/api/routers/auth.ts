@@ -13,6 +13,8 @@ import {
 } from "@/server/db/schema";
 import { slugify } from "@/lib/utils";
 import { activateProjectDraft, claimPendingInvitesForEmail } from "@/server/team/context";
+import { activateOnboardingSession } from "@/server/onboarding/activate-session";
+import { runInitialTeamScrape } from "@/server/jobs/sync-section";
 
 export const authRouter = createTRPCRouter({
   signup: publicProcedure
@@ -22,6 +24,7 @@ export const authRouter = createTRPCRouter({
         email: z.string().email(),
         password: z.string().min(8).max(128),
         draftToken: z.string().optional(),
+        onboardingSessionId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -48,7 +51,16 @@ export const authRouter = createTRPCRouter({
         slugify(`${input.name}-team`) + "-" + Date.now().toString(36);
 
       let teamName = `Équipe ${input.name}`;
-      if (input.draftToken) {
+      if (input.onboardingSessionId) {
+        const { onboardingSessions } = await import("@/server/db/schema");
+        const { eq } = await import("drizzle-orm");
+        const session = await ctx.db.query.onboardingSessions.findFirst({
+          where: eq(onboardingSessions.id, input.onboardingSessionId),
+        });
+        if (session?.projectName || session?.productName) {
+          teamName = session.projectName ?? session.productName ?? teamName;
+        }
+      } else if (input.draftToken) {
         const draft = await ctx.db.query.projectDrafts.findFirst({
           where: and(
             eq(projectDrafts.draftToken, input.draftToken),
@@ -86,7 +98,22 @@ export const authRouter = createTRPCRouter({
 
       await claimPendingInvitesForEmail(ctx.db, user!.id, input.email);
 
-      if (input.draftToken) {
+      let onboardingActivated = false;
+
+      if (input.onboardingSessionId) {
+        try {
+          const activated = await activateOnboardingSession(
+            ctx.db,
+            user!.id,
+            team!.id,
+            input.onboardingSessionId,
+            { requirePaid: true },
+          );
+          onboardingActivated = !!activated;
+        } catch (error) {
+          console.error("[signup] activateOnboardingSession:", error);
+        }
+      } else if (input.draftToken) {
         try {
           const activated = await activateProjectDraft(
             ctx.db,
@@ -96,6 +123,10 @@ export const authRouter = createTRPCRouter({
           );
           if (!activated) {
             console.warn(`[signup] draft not activated: ${input.draftToken}`);
+          } else {
+            void runInitialTeamScrape(ctx.db, team!.id).catch((error) => {
+              console.error("[signup] initial scrape:", error);
+            });
           }
         } catch (error) {
           console.error("[signup] activateProjectDraft:", error);
@@ -114,6 +145,7 @@ export const authRouter = createTRPCRouter({
         teamId: team!.id,
         email: user!.email,
         draftActivated: !!input.draftToken,
+        onboardingActivated,
       };
     }),
 });

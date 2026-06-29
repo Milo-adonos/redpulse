@@ -14,7 +14,13 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
-export const planEnum = pgEnum("plan", ["free", "pro", "enterprise"]);
+export const planEnum = pgEnum("plan", [
+  "free",
+  "starter",
+  "growth",
+  "pro",
+  "enterprise",
+]);
 export const roleEnum = pgEnum("role", ["owner", "admin", "editor", "viewer"]);
 export const postStatusEnum = pgEnum("post_status", [
   "draft",
@@ -43,7 +49,12 @@ export const alertFrequencyEnum = pgEnum("alert_frequency", [
   "weekly",
 ]);
 
-export const messageTypeEnum = pgEnum("message_type", ["reply", "warmup"]);
+export const messageTypeEnum = pgEnum("message_type", [
+  "reply",
+  "warmup",
+  "influence",
+  "post",
+]);
 export const responseLanguageEnum = pgEnum("response_language", ["fr", "en"]);
 
 export const entityTypeEnum = pgEnum("entity_type", ["post", "comment", "dm"]);
@@ -60,6 +71,13 @@ export const users = pgTable("users", {
   email: varchar("email", { length: 255 }).notNull().unique(),
   passwordHash: text("password_hash"),
   name: varchar("name", { length: 255 }),
+  firstName: varchar("first_name", { length: 255 }),
+  lastName: varchar("last_name", { length: 255 }),
+  plan: varchar("plan", { length: 20 }),
+  messagesLimit: integer("messages_limit").notNull().default(200),
+  messagesUsed: integer("messages_used").notNull().default(0),
+  planStartedAt: timestamp("plan_started_at", { withTimezone: true }),
+  messagesResetAt: timestamp("messages_reset_at", { withTimezone: true }),
   emailVerified: timestamp("email_verified", { withTimezone: true }),
   image: text("image"),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -145,7 +163,9 @@ export const projects = pgTable(
     name: varchar("name", { length: 255 }).notNull(),
     siteUrl: text("site_url").notNull(),
     description: text("description").notNull(),
+    productPrompt: text("product_prompt"),
     keywords: jsonb("keywords").$type<string[]>().default([]),
+    competitors: jsonb("competitors").$type<string[]>().default([]),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -156,12 +176,40 @@ export const projects = pgTable(
   (table) => [uniqueIndex("projects_team_idx").on(table.teamId)],
 );
 
+export const onboardingSessions = pgTable("onboarding_sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  url: text("url").notNull(),
+  productName: varchar("product_name", { length: 255 }),
+  tagline: text("tagline"),
+  problemSolved: text("problem_solved"),
+  targetAudience: text("target_audience"),
+  keyFeatures: jsonb("key_features").$type<string[]>().default([]),
+  tone: varchar("tone", { length: 50 }),
+  productPrompt: text("product_prompt"),
+  suggestedSubreddits: jsonb("suggested_subreddits").$type<string[]>().default([]),
+  suggestedKeywords: jsonb("suggested_keywords").$type<string[]>().default([]),
+  competitors: jsonb("competitors").$type<string[]>().default([]),
+  scrapedText: text("scraped_text"),
+  firstName: varchar("first_name", { length: 255 }),
+  lastName: varchar("last_name", { length: 255 }),
+  email: varchar("email", { length: 255 }),
+  projectName: varchar("project_name", { length: 255 }),
+  plan: varchar("plan", { length: 20 }),
+  stripeSessionId: varchar("stripe_session_id", { length: 255 }),
+  paid: boolean("paid").notNull().default(false),
+  completed: boolean("completed").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export const projectDrafts = pgTable("project_drafts", {
   id: uuid("id").primaryKey().defaultRandom(),
   draftToken: varchar("draft_token", { length: 64 }).notNull().unique(),
   projectName: varchar("project_name", { length: 255 }).notNull(),
   siteUrl: text("site_url").notNull(),
   description: text("description").notNull(),
+  productPrompt: text("product_prompt"),
   keywords: jsonb("keywords").$type<string[]>().default([]),
   subreddits: jsonb("subreddits").$type<string[]>().default([]),
   invites: jsonb("invites").$type<string[]>().default([]),
@@ -209,11 +257,93 @@ export const teamSettings = pgTable("team_settings", {
     .default("daily"),
   responseLanguage: responseLanguageEnum("response_language")
     .notNull()
-    .default("fr"),
+    .default("en"),
+  replyMinScore: integer("reply_min_score").notNull().default(80),
+  warmupMinScore: integer("warmup_min_score").notNull().default(40),
+  influenceMinScore: integer("influence_min_score").notNull().default(65),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
 });
+
+export const teamRedditProfiles = pgTable("team_reddit_profiles", {
+  teamId: uuid("team_id")
+    .primaryKey()
+    .references(() => teams.id, { onDelete: "cascade" }),
+  profileUrl: text("profile_url").notNull(),
+  username: varchar("username", { length: 100 }).notNull(),
+  totalKarma: integer("total_karma").notNull().default(0),
+  linkKarma: integer("link_karma").notNull().default(0),
+  commentKarma: integer("comment_karma").notNull().default(0),
+  postCount: integer("post_count"),
+  commentCount: integer("comment_count"),
+  activeSubreddits: jsonb("active_subreddits")
+    .$type<{ subreddit: string; contributions: number }[]>()
+    .default([]),
+  accountCreatedAt: timestamp("account_created_at", { withTimezone: true }),
+  baselineKarma: integer("baseline_karma"),
+  scrapedAt: timestamp("scraped_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const redditKarmaSnapshots = pgTable("reddit_karma_snapshots", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  teamId: uuid("team_id")
+    .notNull()
+    .references(() => teams.id, { onDelete: "cascade" }),
+  totalKarma: integer("total_karma").notNull(),
+  recordedAt: timestamp("recorded_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type SubredditVoiceProfile = {
+  tone?: string;
+  avg_length?: string;
+  common_abbreviations?: string[];
+  common_expressions?: string[];
+  emoji_usage?: string;
+  typical_emojis?: string[];
+  capitalization?: string;
+  punctuation_style?: string;
+  greeting_style?: string;
+  question_style?: string;
+  typical_openers?: string[];
+  things_to_avoid?: string[];
+  example_authentic_comment?: string;
+};
+
+export const subredditVoices = pgTable(
+  "subreddit_voices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    subreddit: varchar("subreddit", { length: 100 }).notNull(),
+    voiceProfile: jsonb("voice_profile")
+      .$type<SubredditVoiceProfile>()
+      .notNull()
+      .default({}),
+    sampleSize: integer("sample_size").notNull().default(0),
+    analyzedAt: timestamp("analyzed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("subreddit_voices_project_sub_idx").on(
+      table.projectId,
+      table.subreddit,
+    ),
+  ],
+);
 
 export const generatedMessages = pgTable(
   "generated_messages",
@@ -232,6 +362,9 @@ export const generatedMessages = pgTable(
     generatedBody: text("generated_body").notNull(),
     relevanceScore: decimal("relevance_score", { precision: 3, scale: 2 }),
     safetyScore: integer("safety_score").notNull().default(9),
+    banReason: text("ban_reason"),
+    containsUrl: boolean("contains_url").default(false),
+    redditScore: integer("reddit_score"),
     isSent: boolean("is_sent").notNull().default(false),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     sentByUserId: uuid("sent_by_user_id").references(() => users.id),
@@ -282,6 +415,11 @@ export const discoveredPosts = pgTable(
     permalink: text("permalink"),
     matchedKeywords: jsonb("matched_keywords").$type<string[]>(),
     intentScore: decimal("intent_score", { precision: 3, scale: 2 }),
+    flair: text("flair"),
+    relevanceScore: integer("relevance_score"),
+    relevanceSection: varchar("relevance_section", { length: 20 }),
+    relevanceReason: text("relevance_reason"),
+    sectionScores: jsonb("section_scores").$type<Record<string, number>>(),
     isArchived: boolean("is_archived").notNull().default(false),
     discoveredAt: timestamp("discovered_at", { withTimezone: true })
       .notNull()
@@ -290,6 +428,32 @@ export const discoveredPosts = pgTable(
   (table) => [
     uniqueIndex("discovered_posts_team_reddit_idx").on(
       table.teamId,
+      table.redditId,
+    ),
+  ],
+);
+
+export const scrapedComments = pgTable(
+  "scraped_comments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    discoveredPostId: uuid("discovered_post_id")
+      .notNull()
+      .references(() => discoveredPosts.id, { onDelete: "cascade" }),
+    redditId: varchar("reddit_id", { length: 20 }).notNull(),
+    author: varchar("author", { length: 100 }),
+    body: text("body"),
+    score: integer("score").default(0),
+    scrapedAt: timestamp("scraped_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("scraped_comments_post_reddit_idx").on(
+      table.discoveredPostId,
       table.redditId,
     ),
   ],
@@ -427,7 +591,31 @@ export const teamsRelations = relations(teams, ({ one, many }) => ({
     fields: [teams.id],
     references: [teamSettings.teamId],
   }),
+  redditProfile: one(teamRedditProfiles, {
+    fields: [teams.id],
+    references: [teamRedditProfiles.teamId],
+  }),
 }));
+
+export const teamRedditProfilesRelations = relations(
+  teamRedditProfiles,
+  ({ one }) => ({
+    team: one(teams, {
+      fields: [teamRedditProfiles.teamId],
+      references: [teams.id],
+    }),
+  }),
+);
+
+export const redditKarmaSnapshotsRelations = relations(
+  redditKarmaSnapshots,
+  ({ one }) => ({
+    team: one(teams, {
+      fields: [redditKarmaSnapshots.teamId],
+      references: [teams.id],
+    }),
+  }),
+);
 
 export const generatedMessagesRelations = relations(
   generatedMessages,
@@ -439,9 +627,20 @@ export const generatedMessagesRelations = relations(
   }),
 );
 
-export const projectsRelations = relations(projects, ({ one }) => ({
+export const projectsRelations = relations(projects, ({ one, many }) => ({
   team: one(teams, { fields: [projects.teamId], references: [teams.id] }),
+  subredditVoices: many(subredditVoices),
 }));
+
+export const subredditVoicesRelations = relations(
+  subredditVoices,
+  ({ one }) => ({
+    project: one(projects, {
+      fields: [subredditVoices.projectId],
+      references: [projects.id],
+    }),
+  }),
+);
 
 export const discoveredPostsRelations = relations(
   discoveredPosts,

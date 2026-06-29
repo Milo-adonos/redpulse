@@ -7,6 +7,8 @@ import {
   analyzeProductFromSite,
   extractKeywords,
 } from "@/server/project/site-analysis";
+import { callAnthropic } from "@/server/ai/client";
+import { MAX_TOKENS_MESSAGE } from "@/server/ai/constants";
 
 function normalizeSiteUrl(raw: string): string {
   const trimmed = raw.trim();
@@ -37,21 +39,9 @@ export const projectRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ input }) => {
-      const apiKey = process.env.ANTHROPIC_API_KEY;
-      if (!apiKey) {
-        return { description: input.description, suggestions: [] as string[] };
-      }
-
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5-20251001",
-          max_tokens: 800,
+      try {
+        const text = await callAnthropic({
+          max_tokens: MAX_TOKENS_MESSAGE,
           messages: [
             {
               role: "user",
@@ -61,24 +51,14 @@ Product: ${input.productName ?? "SaaS"}
 Current brief: ${input.description}`,
             },
           ],
-        }),
-      });
+        });
 
-      if (!res.ok) {
-        return { description: input.description, suggestions: [] as string[] };
-      }
-
-      const data = (await res.json()) as {
-        content: Array<{ type: string; text?: string }>;
-      };
-      const raw = data.content.find((b) => b.type === "text")?.text ?? "";
-      try {
-        return JSON.parse(raw.replace(/^```json\s*|\s*```$/g, "").trim()) as {
+        return JSON.parse(text.replace(/^```json\s*|\s*```$/g, "").trim()) as {
           description: string;
           suggestions: string[];
         };
       } catch {
-        return { description: raw || input.description, suggestions: [] };
+        return { description: input.description, suggestions: [] as string[] };
       }
     }),
 
@@ -88,8 +68,9 @@ Current brief: ${input.description}`,
         projectName: z.string().min(2).max(100),
         siteUrl: z.string().min(3).max(500),
         description: z.string().max(4000).default(""),
+        productPrompt: z.string().max(8000).optional(),
         keywords: z.array(z.string()).max(30).default([]),
-        subreddits: z.array(z.string()).max(20).default([]),
+        subreddits: z.array(z.string()).max(10).default([]),
         invites: z.array(z.string()).max(10).default([]),
       }),
     )
@@ -127,6 +108,8 @@ Current brief: ${input.description}`,
         projectName: input.projectName,
         siteUrl,
         description: input.description || input.projectName,
+        productPrompt:
+          input.productPrompt ?? (input.description || input.projectName),
         keywords,
         subreddits,
         invites,

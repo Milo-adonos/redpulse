@@ -12,6 +12,7 @@ import { analyticsRouter } from "@/server/api/routers/analytics";
 import { warmupRouter } from "@/server/api/routers/warmup";
 import { messagesRouter } from "@/server/api/routers/messages";
 import { dmRouter } from "@/server/api/routers/dm";
+import { onboardingRouter } from "@/server/api/routers/onboarding";
 
 export const appRouter = createTRPCRouter({
   health: healthRouter,
@@ -27,6 +28,7 @@ export const appRouter = createTRPCRouter({
   warmup: warmupRouter,
   messages: messagesRouter,
   dm: dmRouter,
+  onboarding: onboardingRouter,
 });
 
 export type AppRouter = typeof appRouter;

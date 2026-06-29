@@ -1,11 +1,59 @@
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createTRPCRouter, teamProcedure } from "@/server/api/trpc";
-import { keywordFilters } from "@/server/db/schema";
+import {
+  generatedMessages,
+  keywordFilters,
+  teamRedditProfiles,
+} from "@/server/db/schema";
 import { fetchSubredditPosts } from "@/server/reddit/client";
 import { generateWarmupReply } from "@/server/ai/anthropic";
 
+function startOfToday(): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
 export const warmupRouter = createTRPCRouter({
+  getStats: teamProcedure.query(async ({ ctx }) => {
+    const warmupMessages = await ctx.db!.query.generatedMessages.findMany({
+      where: and(
+        eq(generatedMessages.teamId, ctx.teamId),
+        eq(generatedMessages.type, "warmup"),
+      ),
+    });
+
+    const todayStart = startOfToday();
+    const commentsToday = warmupMessages.filter(
+      (m) => m.isSent && m.sentAt && m.sentAt >= todayStart,
+    ).length;
+
+    const redditProfile = await ctx.db!.query.teamRedditProfiles.findFirst({
+      where: eq(teamRedditProfiles.teamId, ctx.teamId),
+    });
+
+    const karmaGained = redditProfile
+      ? redditProfile.totalKarma -
+        (redditProfile.baselineKarma ?? redditProfile.totalKarma)
+      : 0;
+
+    const withSafety = warmupMessages.filter((m) => m.generatedBody?.trim());
+    const avgSafety =
+      withSafety.length > 0
+        ? withSafety.reduce((sum, m) => sum + m.safetyScore, 0) / withSafety.length
+        : 10;
+
+    const banRisk = Math.round((1 - avgSafety / 10) * 1000) / 1000;
+
+    return {
+      commentsToday,
+      karmaGained: redditProfile ? karmaGained : 0,
+      hasRedditProfile: Boolean(redditProfile?.profileUrl),
+      banRisk,
+    };
+  }),
+
   getSuggestions: teamProcedure.query(async ({ ctx }) => {
     const filter = await ctx.db!.query.keywordFilters.findFirst({
       where: eq(keywordFilters.teamId, ctx.teamId),

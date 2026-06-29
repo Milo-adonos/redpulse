@@ -13,7 +13,6 @@ import {
   ScheduleDemo,
 } from "@/components/landing/feature-demos";
 import { VisionSection, LandingFooter } from "@/components/landing/vision";
-import { OnboardingFlow } from "@/components/landing/onboarding-flow";
 
 export default function HomePage() {
   return (
@@ -27,7 +26,6 @@ export default function HomePage() {
       <LandingNav />
       <main id="main" className="relative overflow-x-hidden bg-black">
         <LandingHero />
-        <OnboardingFlow />
 
         <div id="discover" className="relative">
           <ChapterDivider />

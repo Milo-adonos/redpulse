@@ -1,124 +1,62 @@
-import { z } from "zod";
-import { and, count, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { createTRPCRouter, teamProcedure } from "@/server/api/trpc";
 import {
-  analyticsEvents,
-  comments,
-  discoveredPosts,
+  generatedMessages,
+  keywordFilters,
 } from "@/server/db/schema";
 
 export const analyticsRouter = createTRPCRouter({
   summary: teamProcedure.query(async ({ ctx }) => {
-    const monthAgo = new Date();
-    monthAgo.setDate(monthAgo.getDate() - 30);
-
-    const [views, sent, discovered, subredditRows] = await Promise.all([
-      ctx.db!
-        .select({ total: sql<number>`coalesce(sum(${analyticsEvents.value}), 0)` })
-        .from(analyticsEvents)
-        .where(
-          and(
-            eq(analyticsEvents.teamId, ctx.teamId),
-            eq(analyticsEvents.eventType, "view"),
-            gte(analyticsEvents.recordedAt, monthAgo),
-          ),
+    const [messages, sentMessages, filters, subredditStats] = await Promise.all([
+      ctx.db!.query.generatedMessages.findMany({
+        where: eq(generatedMessages.teamId, ctx.teamId),
+      }),
+      ctx.db!.query.generatedMessages.findMany({
+        where: and(
+          eq(generatedMessages.teamId, ctx.teamId),
+          eq(generatedMessages.isSent, true),
         ),
-      ctx.db!
-        .select({ count: count() })
-        .from(comments)
-        .where(
-          and(
-            eq(comments.teamId, ctx.teamId),
-            eq(comments.status, "sent"),
-            gte(comments.sentAt, monthAgo),
-          ),
-        ),
-      ctx.db!
-        .select({ count: count() })
-        .from(discoveredPosts)
-        .where(
-          and(
-            eq(discoveredPosts.teamId, ctx.teamId),
-            gte(discoveredPosts.discoveredAt, monthAgo),
-          ),
-        ),
+      }),
+      ctx.db!.query.keywordFilters.findFirst({
+        where: eq(keywordFilters.teamId, ctx.teamId),
+      }),
       ctx.db!
         .select({
-          subreddit: discoveredPosts.subreddit,
-          count: count(),
+          subreddit: generatedMessages.subreddit,
+          comments: sql<number>`count(*) filter (where ${generatedMessages.isSent} = true)::int`,
+          generated: sql<number>`count(*)::int`,
+          upvotes: sql<number>`coalesce(sum(${generatedMessages.redditScore}), 0)::int`,
+          posts: sql<number>`count(distinct ${generatedMessages.redditId})::int`,
         })
-        .from(discoveredPosts)
-        .where(
-          and(
-            eq(discoveredPosts.teamId, ctx.teamId),
-            gte(discoveredPosts.discoveredAt, monthAgo),
-          ),
-        )
-        .groupBy(discoveredPosts.subreddit)
-        .orderBy(desc(count()))
-        .limit(5),
+        .from(generatedMessages)
+        .where(eq(generatedMessages.teamId, ctx.teamId))
+        .groupBy(generatedMessages.subreddit)
+        .orderBy(desc(sql`count(*)`)),
     ]);
 
-    const sentCount = sent[0]?.count ?? 0;
-    const discoveredCount = discovered[0]?.count ?? 0;
-    const conversion =
-      discoveredCount > 0
-        ? Number(((sentCount / discoveredCount) * 100).toFixed(1))
-        : 0;
+    const generatedCount = messages.length;
+    const sentCount = sentMessages.length;
+    const trackedSubreddits = filters?.subreddits?.length ?? 0;
 
-    const weeklySent = await ctx.db!
-      .select({
-        week: sql<string>`to_char(date_trunc('week', ${comments.sentAt}), 'IYYY-IW')`,
-        count: count(),
-      })
-      .from(comments)
-      .where(
-        and(
-          eq(comments.teamId, ctx.teamId),
-          eq(comments.status, "sent"),
-          gte(comments.sentAt, monthAgo),
-        ),
-      )
-      .groupBy(sql`date_trunc('week', ${comments.sentAt})`)
-      .orderBy(sql`date_trunc('week', ${comments.sentAt})`);
+    const subredditPerformance = subredditStats.map((row) => {
+      const comments = row.comments ?? 0;
+      const generated = row.generated ?? 0;
+      const ratio =
+        generated > 0 ? Math.round((comments / generated) * 100) : 0;
+      return {
+        subreddit: `r/${row.subreddit}`,
+        comments,
+        ratio,
+        upvotes: row.upvotes ?? 0,
+        posts: row.posts ?? 0,
+      };
+    });
 
     return {
-      kpis: {
-        views: Number(views[0]?.total ?? sentCount * 120),
-        conversion,
-        avgUpvotes: sentCount > 0 ? Math.round(18 + sentCount * 0.2) : 0,
-        conversations: discoveredCount,
-      },
-      subredditEngagement: subredditRows.map((r) => ({
-        label: r.subreddit,
-        value: r.count,
-      })),
-      weeklySent: weeklySent.map((w) => w.count),
-      actionSplit: {
-        sent: sentCount,
-        pending: (
-          await ctx.db!
-            .select({ count: count() })
-            .from(comments)
-            .where(
-              and(
-                eq(comments.teamId, ctx.teamId),
-                eq(comments.status, "pending_review"),
-              ),
-            )
-        )[0]?.count ?? 0,
-        drafts: (
-          await ctx.db!
-            .select({ count: count() })
-            .from(comments)
-            .where(
-              and(
-                eq(comments.teamId, ctx.teamId),
-                eq(comments.status, "draft"),
-              ),
-            )
-        )[0]?.count ?? 0,
-      },
+      generatedCount,
+      sentCount,
+      trackedSubreddits,
+      subredditPerformance,
     };
   }),
 });
