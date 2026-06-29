@@ -4,4 +4,4 @@ export const MAX_TOKENS_MESSAGE = 200;
 export const MAX_TOKENS_SCORING = 50;
 export const MAX_TOKENS_ONBOARDING = 500;
 export const MAX_TOKENS_LANDING_ANALYSIS = 500;
-export const MAX_TOKENS_VOICE_ANALYSIS = 300;
+export const MAX_TOKENS_VOICE_ANALYSIS = 200;

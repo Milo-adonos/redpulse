@@ -13,6 +13,7 @@ import {
   computeStyleConfidence,
   getProjectIdForTeam,
   getSubredditVoice,
+  analyzeSubredditVoice,
 } from "@/server/reddit/subreddit-voice";
 import {
   assertMessageQuota,
@@ -23,11 +24,17 @@ async function getVoiceContext(
   db: Database,
   teamId: string,
   subreddit: string,
+  options?: { ensure?: boolean },
 ) {
   const projectId = await getProjectIdForTeam(db, teamId);
   if (!projectId) {
     return { voiceProfile: null, styleConfidence: 1, hasVoiceProfile: false };
   }
+
+  if (options?.ensure) {
+    await analyzeSubredditVoice(db, projectId, subreddit).catch(() => null);
+  }
+
   const voice = await getSubredditVoice(db, projectId, subreddit);
   if (!voice) {
     return { voiceProfile: null, styleConfidence: 1, hasVoiceProfile: false };
@@ -148,7 +155,7 @@ export async function generateMessageForPost(
   const [project, targeting, voice] = await Promise.all([
     db.query.projects.findFirst({ where: eq(projects.teamId, teamId) }),
     getTeamTargeting(db, teamId),
-    getVoiceContext(db, teamId, post.subreddit),
+    getVoiceContext(db, teamId, post.subreddit, { ensure: true }),
   ]);
 
   const { keywords } = targeting;

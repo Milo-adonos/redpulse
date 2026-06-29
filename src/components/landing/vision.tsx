@@ -32,7 +32,7 @@ export function VisionSection() {
           <div className="mt-12 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
               href="/dashboard"
-              className="group inline-flex items-center gap-2 rounded-full bg-white px-8 py-4 text-[14px] font-medium text-black transition-all hover:shadow-glow-white"
+              className="group inline-flex items-center gap-2 rounded-full bg-[#f97316] px-8 py-4 text-[14px] font-medium text-white transition-all hover:bg-[#ea6c0a]"
             >
               Entrer dans RedPulse
               <span className="transition-transform group-hover:translate-x-1">→</span>

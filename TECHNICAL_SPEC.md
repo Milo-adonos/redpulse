@@ -173,7 +173,7 @@ All tables use UUID primary keys (`gen_random_uuid()`), `createdAt`/`updatedAt` 
 | `discoveredPostId` | `uuid` FK | Target thread |
 | `body` | `text` | Generated + edited |
 | `status` | `enum` | `draft`, `pending_review`, `approved`, `sent`, `rejected` |
-| `aiModel` | `varchar(50)` | e.g. `claude-sonnet-4-20250514` |
+| `aiModel` | `varchar(50)` | e.g. `claude-haiku-4-5-20251001` |
 | `productMention` | `boolean` | Flagged for compliance |
 | `sentAt` | `timestamptz` | |
 | `redditCommentId` | `varchar(20)` | |
@@ -397,7 +397,7 @@ Provide an admin view (role: `admin`+) for operational monitoring:
 
 1. Client calls `ai.generateReply` with post context + product brief from team settings.
 2. Server builds prompt: post title/body, subreddit rules snippet, tone, anti-spam guidelines.
-3. **Anthropic Messages API** (`claude-sonnet-4-20250514`): max 300 tokens, temperature 0.7.
+3. **Anthropic Messages API** (`claude-haiku-4-5-20251001`): max 200 tokens for messages, 500 for onboarding, temperature 0.7.
 4. Post-generation **safety pipeline:**
    - Link density check (max 1 URL)
    - Promotional language score

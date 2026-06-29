@@ -51,6 +51,24 @@ function AnalyzingContent() {
       setError("URL manquante");
       return;
     }
+
+    const storageKey = `redpulse:analyzing:${url}`;
+    let storedSessionId: string | null = null;
+    try {
+      storedSessionId = sessionStorage.getItem(storageKey);
+    } catch {
+      // ignore
+    }
+
+    if (storedSessionId) {
+      setSessionId(storedSessionId);
+      setActiveStep(1);
+      if (!runAnalysis.isSuccess && !runAnalysis.isPending) {
+        runAnalysis.mutate({ sessionId: storedSessionId });
+      }
+      return;
+    }
+
     if (startScrape.isSuccess || startScrape.isPending) return;
     startScrape.mutate({ url });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -58,6 +76,14 @@ function AnalyzingContent() {
 
   useEffect(() => {
     if (!startScrape.data || sessionId) return;
+    try {
+      sessionStorage.setItem(
+        `redpulse:analyzing:${url}`,
+        startScrape.data.sessionId,
+      );
+    } catch {
+      // ignore
+    }
     setSessionId(startScrape.data.sessionId);
     setActiveStep(1);
     runAnalysis.mutate({ sessionId: startScrape.data.sessionId });

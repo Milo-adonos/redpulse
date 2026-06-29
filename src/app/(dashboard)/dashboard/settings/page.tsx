@@ -85,7 +85,7 @@ export default function SettingsPage() {
       setProductPrompt(data.productPrompt ?? data.suggestedDescription);
       setKeywords(data.keywords);
       setSubreddits(data.subreddits.slice(0, 10));
-      setNotice("Site re-analyzed — review fields then save.");
+      setNotice("Site re-analyzed. Review fields then save.");
       setTimeout(() => setNotice(null), 4000);
     },
   });
@@ -101,6 +101,7 @@ export default function SettingsPage() {
     setSubreddits(settings.subreddits);
     setDiscoveryMode(settings.discoveryMode);
     setPostsPerDay(settings.postsPerDay);
+    setSinceDate(settings.discoverySince ?? "");
   }, [settings]);
 
   function showSaved() {
@@ -121,7 +122,11 @@ export default function SettingsPage() {
   }
 
   function saveDiscovery() {
-    updateDiscovery.mutate({ mode: discoveryMode, postsPerDay });
+    updateDiscovery.mutate({
+      mode: discoveryMode,
+      postsPerDay,
+      discoverySince: sinceDate || undefined,
+    });
     updateFilters.mutate({ keywords, subreddits: subreddits.slice(0, 10) });
   }
 
@@ -331,7 +336,7 @@ export default function SettingsPage() {
                   })}
                   {!subreddits.length && (
                     <p className="text-[12px] text-white/40">
-                      Ajoutez des subreddits — l&apos;analyse démarre au premier scraping.
+                      Ajoutez des subreddits. L&apos;analyse démarre au premier scraping.
                     </p>
                   )}
                 </div>
@@ -375,7 +380,7 @@ export default function SettingsPage() {
             <div className="space-y-5">
               <h2 className="text-[14px] font-medium text-white">Competitors</h2>
               <p className="text-[12px] text-white/40">
-                Reddit tracking coming soon — URLs stockées en base.
+                Reddit tracking coming soon. URLs stockées en base.
               </p>
               <div className="flex gap-2">
                 <input
@@ -388,7 +393,7 @@ export default function SettingsPage() {
                   type="button"
                   onClick={addCompetitorUrl}
                   disabled={!competitorUrl.trim() || addCompetitor.isLoading}
-                  className="shrink-0 rounded-full bg-white px-4 py-2.5 text-[12px] font-semibold text-black hover:bg-white/90 disabled:opacity-50"
+                  className="shrink-0 rounded-full bg-[#f97316] px-4 py-2.5 text-[12px] font-semibold text-white hover:bg-[#ea6c0a] disabled:opacity-50"
                 >
                   Add competitor
                 </button>
@@ -439,7 +444,7 @@ function SaveButton({ onClick, loading }: { onClick: () => void; loading?: boole
       type="button"
       onClick={onClick}
       disabled={loading}
-      className="rounded-full bg-white px-6 py-3 text-[13px] font-semibold text-black hover:bg-white/90 disabled:opacity-50"
+      className="rounded-full bg-[#f97316] px-6 py-3 text-[13px] font-semibold text-white hover:bg-[#ea6c0a] disabled:opacity-50"
     >
       Save
     </button>

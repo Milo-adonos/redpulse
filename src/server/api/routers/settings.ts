@@ -62,6 +62,7 @@ export const settingsRouter = createTRPCRouter({
           : (settings?.replyMinScore ?? 80) <= 70
             ? ("aggressive" as const)
             : ("balanced" as const),
+      discoverySince: settings?.discoverySince ?? "",
     };
   }),
 
@@ -139,6 +140,7 @@ export const settingsRouter = createTRPCRouter({
         replyMinScore: z.number().min(0).max(100).optional(),
         warmupMinScore: z.number().min(0).max(100).optional(),
         influenceMinScore: z.number().min(0).max(100).optional(),
+        discoverySince: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -158,6 +160,7 @@ export const settingsRouter = createTRPCRouter({
           warmupMinScore: scores?.warmup ?? input.warmupMinScore ?? 40,
           influenceMinScore: scores?.influence ?? input.influenceMinScore ?? 65,
           postsPerDay: input.postsPerDay ?? 25,
+          discoverySince: input.discoverySince || null,
           updatedAt: new Date(),
         })
         .onConflictDoUpdate({
@@ -181,6 +184,9 @@ export const settingsRouter = createTRPCRouter({
                     : {}),
                 }),
             ...(input.postsPerDay != null ? { postsPerDay: input.postsPerDay } : {}),
+            ...(input.discoverySince
+              ? { discoverySince: input.discoverySince }
+              : {}),
             updatedAt: new Date(),
           },
         });

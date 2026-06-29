@@ -34,6 +34,82 @@ function sectionFromScore(score: number): RelevanceSection {
   return "irrelevant";
 }
 
+function extractTerms(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .filter((term) => term.length > 3)
+    .slice(0, 40);
+}
+
+/** Keyword-based scoring for scrape refresh — no Claude calls. */
+export function scorePostRelevanceHeuristic(input: {
+  productPrompt: string;
+  keywords?: string[];
+  title: string;
+  body: string;
+}): RelevanceResult {
+  const text = `${input.title} ${input.body}`.toLowerCase();
+  const terms = [
+    ...new Set([
+      ...extractTerms(input.productPrompt),
+      ...(input.keywords ?? []).map((k) => k.toLowerCase()),
+    ]),
+  ].filter((term) => !term.startsWith("__"));
+
+  const redditSignals = [
+    "reddit",
+    "subreddit",
+    "karma",
+    "ban",
+    "banned",
+    "marketing",
+    "growth",
+    "saas",
+    "tool",
+    "promote",
+    "traction",
+  ];
+
+  let score = 0;
+  let matchedTerms = 0;
+
+  for (const term of terms) {
+    if (text.includes(term)) {
+      matchedTerms += 1;
+      score += 12;
+    }
+  }
+
+  for (const signal of redditSignals) {
+    if (text.includes(signal)) score += 8;
+  }
+
+  if (
+    text.includes("?") ||
+    /\b(how|what|anyone|best|recommend)\b/.test(text)
+  ) {
+    score += 15;
+  }
+
+  if (matchedTerms === 0 && score < 40) {
+    score = Math.min(score, 35);
+  } else {
+    score = Math.max(score, 40 + matchedTerms * 5);
+  }
+
+  score = Math.max(0, Math.min(100, Math.round(score)));
+
+  return {
+    score,
+    section: sectionFromScore(score),
+    reason:
+      matchedTerms > 0
+        ? "Keyword and intent match"
+        : "General Reddit engagement opportunity",
+  };
+}
+
 export async function scorePostRelevance(input: {
   productPrompt: string;
   title: string;

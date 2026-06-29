@@ -5,9 +5,9 @@ import {
   keywordFilters,
   projects,
   scrapedComments,
+  teamSettings,
 } from "@/server/db/schema";
-import { scorePostRelevance } from "@/server/ai/relevance-scoring";
-import { ensureSubredditVoicesForTeam } from "@/server/reddit/subreddit-voice";
+import { scorePostRelevanceHeuristic } from "@/server/ai/relevance-scoring";
 import { buildRedditPostUrl } from "@/server/reddit/client";
 import { redditDateFromUnix } from "@/server/reddit/freshness";
 import {
@@ -173,7 +173,17 @@ async function storeComments(
 
 /** Reddit fetch only — no Anthropic calls. */
 export async function scrapeTeamDiscovery(db: Database, teamId: string) {
-  const { subreddits } = await getTeamTargeting(db, teamId);
+  const [{ subreddits }, settingsRow] = await Promise.all([
+    getTeamTargeting(db, teamId),
+    db.query.teamSettings.findFirst({
+      where: eq(teamSettings.teamId, teamId),
+      columns: { discoverySince: true },
+    }),
+  ]);
+
+  const sinceMs = settingsRow?.discoverySince
+    ? new Date(`${settingsRow.discoverySince}T00:00:00.000Z`).getTime()
+    : null;
 
   if (!subreddits.length) {
     return { inserted: 0, subreddits: 0 };
@@ -195,6 +205,7 @@ export async function scrapeTeamDiscovery(db: Database, teamId: string) {
 
     for (const post of posts) {
       if (existingIds.has(post.id)) continue;
+      if (sinceMs != null && post.created_utc * 1000 < sinceMs) continue;
 
       try {
         const [row] = await db
@@ -235,11 +246,14 @@ export async function scrapeTeamDiscovery(db: Database, teamId: string) {
   return { inserted, subreddits: subreddits.length };
 }
 
-/** Score posts that have not been scored yet — Claude haiku, max 50 tokens. */
+/** Score posts that have not been scored yet — heuristic only, no Claude. */
 export async function scoreUnscoredPosts(db: Database, teamId: string) {
-  const project = await db.query.projects.findFirst({
-    where: eq(projects.teamId, teamId),
-  });
+  const [project, targeting] = await Promise.all([
+    db.query.projects.findFirst({
+      where: eq(projects.teamId, teamId),
+    }),
+    getTeamTargeting(db, teamId),
+  ]);
 
   const productPrompt =
     project?.productPrompt?.trim() ||
@@ -260,8 +274,9 @@ export async function scoreUnscoredPosts(db: Database, teamId: string) {
   let scored = 0;
 
   for (const post of unscored) {
-    const relevance = await scorePostRelevance({
+    const relevance = scorePostRelevanceHeuristic({
       productPrompt,
+      keywords: targeting.keywords,
       title: post.title,
       body: post.body ?? "",
     });
@@ -290,9 +305,7 @@ export async function scoreUnscoredPosts(db: Database, teamId: string) {
 export async function scrapeAndScoreTeam(db: Database, teamId: string) {
   const scrapeResult = await scrapeTeamDiscovery(db, teamId);
   const scoreResult = await scoreUnscoredPosts(db, teamId);
-  const { subreddits } = await getTeamTargeting(db, teamId);
-  const voiceResult = await ensureSubredditVoicesForTeam(db, teamId, subreddits);
-  return { ...scrapeResult, ...scoreResult, voicesAnalyzed: voiceResult.analyzed };
+  return { ...scrapeResult, ...scoreResult };
 }
 
 export async function scrapeAllTeams(db: Database) {

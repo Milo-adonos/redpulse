@@ -11,6 +11,7 @@ import {
   pgEnum,
   uniqueIndex,
   primaryKey,
+  date,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -261,6 +262,7 @@ export const teamSettings = pgTable("team_settings", {
   replyMinScore: integer("reply_min_score").notNull().default(80),
   warmupMinScore: integer("warmup_min_score").notNull().default(40),
   influenceMinScore: integer("influence_min_score").notNull().default(65),
+  discoverySince: date("discovery_since"),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

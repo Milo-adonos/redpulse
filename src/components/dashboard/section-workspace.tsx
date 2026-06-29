@@ -290,11 +290,16 @@ export function SectionWorkspace({
 
                           <div className="mt-3 rounded-lg border border-[#1a1a1a] bg-[#0c0c0c] p-4">
                             <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
                                 <Sparkles className="h-3.5 w-3.5 text-[#f97316]" />
                                 <span className="text-[13px] text-[#888888]">
                                   {replyLabel}
                                 </span>
+                                {sectionType === "influence" && (
+                                  <span className="rounded-full border border-[rgba(249,115,22,0.2)] bg-[rgba(249,115,22,0.1)] px-2.5 py-0.5 text-[11px] text-[#f97316]">
+                                    Curiosity mode
+                                  </span>
+                                )}
                               </div>
                               {item.generatedBody && (
                                 <button

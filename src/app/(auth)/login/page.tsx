@@ -105,7 +105,7 @@ function LoginForm() {
         <button
           type="submit"
           disabled={loading}
-          className="mt-2 w-full rounded-full bg-white py-4 text-[14px] font-medium text-black transition-all hover:bg-white/90 hover:shadow-glow-white disabled:opacity-50"
+          className="mt-2 w-full rounded-full bg-[#f97316] py-4 text-[14px] font-medium text-white transition-all hover:bg-[#ea6c0a] disabled:opacity-50"
         >
           {loading ? "Connexion…" : "Entrer dans RedPulse"}
         </button>

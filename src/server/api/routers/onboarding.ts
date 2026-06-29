@@ -117,6 +117,10 @@ export const onboardingRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Session introuvable" });
       }
 
+      if (session.productName && session.productPrompt) {
+        return sessionPayload(session);
+      }
+
       const pageText = session.scrapedText ?? "";
       const analysis = await analyzeScrapedContent({
         title: session.productName ?? session.url,

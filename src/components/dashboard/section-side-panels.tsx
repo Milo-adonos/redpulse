@@ -67,10 +67,15 @@ export function WarmupSidePanel() {
 export function InfluenceSidePanel() {
   return (
     <div className="rounded-lg border border-[#1a1a1a] bg-[#111111] p-5">
-      <h2 className="text-[16px] font-semibold text-[#f97316]">Strategy</h2>
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-[16px] font-semibold text-[#f97316]">Strategy</h2>
+        <span className="rounded-full border border-[rgba(249,115,22,0.2)] bg-[rgba(249,115,22,0.1)] px-2.5 py-0.5 text-[11px] text-[#f97316]">
+          Curiosity mode
+        </span>
+      </div>
       <p className="mt-3 text-[14px] leading-[1.6] text-[#888888]">
-        Vague enough to spark DMs. Never names the product — they ask for the link
-        themselves.
+        Vague enough to spark DMs. Never names the product. They ask for the
+        link themselves.
       </p>
       <div className="mt-6 rounded-lg border border-[#1a1a1a] bg-[#0c0c0c] p-4">
         <p className="text-[12px] text-[#666666]">Expected outcome</p>
